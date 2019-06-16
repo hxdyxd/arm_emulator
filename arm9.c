@@ -171,26 +171,12 @@ void write_word(char *mem, unsigned int address, unsigned int data)
     *data_p = data;
 }
 
-#define  CHAR_BIT   8
-
-uint32_t rotl32 (uint32_t n, unsigned int c)
+void write_byte(char *mem, unsigned int address, unsigned char data)
 {
-    const unsigned int mask = (CHAR_BIT*sizeof(n)-1);
-    
-    //assert ( (c<=mask) &&"rotate by type width or more");
-    c &= mask;  // avoid undef behaviour with NDEBUG.  0 overhead for most types / compilers
-    return (n<<c) | (n>>( (-c)&mask ));
+    char *data_p;
+    data_p = (char *) (mem + address);
+    *data_p = data;
 }
-
-uint32_t rotr32 (uint32_t n, unsigned int c)
-{
-    const unsigned int mask = (CHAR_BIT*sizeof(n)-1);
-    
-    //assert ( (c<=mask) &&"rotate by type width or more");
-    c &= mask;  // avoid undef behaviour with NDEBUG.  0 overhead for most types / compilers
-    return (n>>c) | (n<<( (-c)&mask ));
-}
-
 
 void fetch(void)
 {
@@ -238,13 +224,13 @@ unsigned char shift_amount = 0;
 unsigned char cond = 0;
 unsigned char Lf = 0, Bf = 0, Uf = 0, Pf = 0, Wf = 0;
 unsigned char Bit22 = 0, Bit20 = 0, Bit7 = 0, Bit4 = 0;
+unsigned char Bit24_23 = 0;
 
 void decode(void)
 {
     
     //ldr/str
     unsigned char f = 0;
-    unsigned char Bit24_23 = 0;
     
     cond = (instruction_word&0xF0000000) >> 28;  /* bit[31:28] */
     f = (instruction_word&0x0E000000)>>25;  /* bit[27:25] */
@@ -397,7 +383,13 @@ void decode(void)
         Lf = (instruction_word&0x100000)>>20; //L bit
         Bf = (instruction_word&0x400000)>>22; //B bit
         Uf = (instruction_word&0x800000) >> 23;  //U bit
-        printf("ldr0 %s%s dst register R%d, base address at R%d, Second address immediate #%s0x%x\r\n", Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-", immediate);
+        Pf = (opcode >> 3) & 1; //P bit[24]
+        Wf = opcode & 1;  //W bit[21]
+        if(Pf) {
+            printf("ldr0 %s%s dst register R%d, [base address at R%d, Second address immediate #%s0x%x] %s\r\n", Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
+        } else {
+            printf("ldr0 %s%s dst register R%d, [base address at R%d], Second address immediate #%s0x%x %s\r\n", Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
+        }
         
         break;
     case 3:
@@ -518,7 +510,11 @@ void execute(void)
     }
     
     if(code_type == code_is_ldr0) {
-        operand2 = immediate;
+        if(Uf) {
+            operand2 = immediate;
+        } else {
+            operand2 = ~immediate + 1;
+        }
         rot_num = 0;
     } else if(code_type == code_is_msr1) {
         operand1 = 0;  //msr don't support
@@ -538,6 +534,12 @@ void execute(void)
         operand1 = b_offset;
         operand2 = register_read(15);
         rot_num = 0;
+    } else if(code_type == code_is_ldm) {
+        operand2 = 0;  //increase After
+        rot_num = 0;
+    } else {
+        printf("unknow code_type = %d", code_type);
+        getchar();
     }
     
     /******************shift**********************/
@@ -567,31 +569,82 @@ void execute(void)
     /******************shift**********************/
     
     if(code_type == code_is_dp0 || code_type == code_is_dp1 || code_type == code_is_dp2) {
-        if(opcode == 2) {
-            //SUB
+        if(opcode == 0 || opcode == 8) {
+            //AND, TST
+            operand1 &= operand2;
+            operand2 = 0;
+        } else if(opcode == 1 || opcode == 9) {
+            //EOR, TEQ
+            operand1 ^= operand2;
+            operand2 = 0;
+        } else if(opcode == 2 || opcode == 10) {
+            //SUB, CMP
             operand2 = ~operand2 + 1;
-        } else if(opcode == 10) {
-            //CMP
+        } else if(opcode == 3) {
+            //RSB
+            operand1 = ~operand1 + 1;
+        } else if(opcode == 4 || opcode == 11) {
+            //ADD, CMN
+        } else if(opcode == 5) {
+            //ADC
+            operand2 += cpsr_c;  //todo...
+        } else if(opcode == 6) {
+            //SBC
             operand2 = ~operand2 + 1;
+        } else if(opcode == 7) {
+            //RSC
+            operand1 = ~operand1 + 1;
+        } else if(opcode == 12) {
+            //ORR
+            operand1 |= operand2;
+            operand2 = 0;
         } else if(opcode == 13) {
             //MOV
             operand1 = 0;
-        }
+        } else if(opcode == 14) {
+            //BIC
+            operand1 &= ~operand2;
+            operand2 = 0;
+        } else if(opcode == 15) {
+            //MNV
+            operand1 = 0;
+            operand2 = ~operand2;
+        } 
     }
     
     unsigned int aluout = operand1 + operand2;
     printf("op1: 0x%x, sf_op2: 0x%x, out: 0x%x, ", operand1, operand2, aluout);
 
     if(code_type == code_is_ldr0) {
+        uint32_t address = operand1;  //Rn
+        if(Pf) {
+            //first add
+            address = aluout;  //aluout
+        }
         if(Lf) {
             //LDR
-            register_write(Rd, read_word(MEM, aluout));
-            printf("load data [0x%x]:0x%x to R%d \r\n", aluout, register_read(Rd), Rd);
+            if(Bf) {
+                //Byte
+                register_write(Rd, read_word(MEM, address) & 0xff);
+            } else {
+                register_write(Rd, read_word(MEM, address));
+            }
+            printf("load data [0x%x]:0x%x to R%d \r\n", address, register_read(Rd), Rd);
         } else {
             //STR
-            write_word(MEM, aluout, register_read(Rd));
-            printf("store data [R%d]:0x%x to 0x%x \r\n", Rd, register_read(Rd), aluout);
+            if(Bf) {
+                write_byte(MEM, address, register_read(Rd) & 0xff);
+            } else {
+                write_word(MEM, address, register_read(Rd));
+            }
+            printf("store data [R%d]:0x%x to 0x%x \r\n", Rd, register_read(Rd) & (Bf?0xff:0xffffffff), address);
         }
+        if(!(!Wf && Pf)) {
+            //Update base register
+            register_write(Rn, aluout);
+            printf("[LDR]write register R%d = 0x%x\r\n", Rn, aluout);
+        }
+        
     } else if(code_type == code_is_msr1 || code_type == code_is_msr0) {
         if(!Bit22) {
             if(IS_SET(Rn, 0) )
@@ -607,8 +660,12 @@ void execute(void)
             printf("spsr not support todo...\r\n");
         }
     } else if(code_type == code_is_dp0 || code_type == code_is_dp2) {
-        register_write(Rd, aluout);
-        printf("write register R%d = 0x%x\r\n", Rd, aluout);
+        if(Bit24_23 == 2) {
+            printf("update flag only \r\n");
+        } else {
+            register_write(Rd, aluout);
+            printf("write register R%d = 0x%x\r\n", Rd, aluout);
+        }
         if(Bit20) {
             //Update CPSR register
             uint8_t op1_sign = IS_SET(operand1, 31);
@@ -617,8 +674,9 @@ void execute(void)
             
             cpsr_n_set(out_sign);
             cpsr_z_set(aluout == 0);
-            cpsr_c_set( 0 );
+            cpsr_c_set( (aluout < operand1) && (aluout < operand2) );
             cpsr_v_set( 0 );
+            printf("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
         }
     } else if(code_type == code_is_bx || code_type == code_is_b) {
         if(Lf) {
@@ -627,6 +685,48 @@ void execute(void)
         }
         register_write(15, aluout & 0xfffffffe);  //PC register
         printf("write register R%d = 0x%x \r\n", 15, aluout);
+    } else if(code_type == code_is_ldm) {
+        if(Lf) { //bit [20]
+            //LDM
+            uint32_t address = operand1;
+            for(int i=0; i<15; i++) {
+                if(IS_SET(instruction_word, i)) {
+                    if(Pf) {
+                        if(Uf) address += 4;
+                        else address -= 4;
+                    }
+                    register_write(i, read_word(MEM, address));
+                    printf("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, read_word(MEM, address), i);
+                    if(!Pf) {
+                        if(Uf) address += 4;
+                        else address -= 4;
+                    }
+                }
+            }
+            
+            if(IS_SET(instruction_word, 15)) {
+                if(Pf) {
+                    if(Uf) address += 4;
+                    else address -= 4;
+                }
+                register_write(15, read_word(MEM, address) & 0xfffffffe);
+                printf("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, read_word(MEM, address), 15);
+                if(!Pf) {
+                    if(Uf) address += 4;
+                    else address -= 4;
+                }
+            }
+            
+            if(Wf) {  //bit[21] W
+                register_write(Rn, address);
+                printf("[LDM] write R%d = 0x%0x \r\n", Rn, address);
+            }
+            
+        } else {
+            //STM
+            printf("unknow code_type = %d", code_type);
+            getchar();
+        }
     }
     
 }
@@ -648,9 +748,9 @@ void reset_proc(void)
 
 int main()
 {
-    int i = 0x20;
+    int i = 0x40000;
     
-    load_program_memory("hello.bin");
+    load_program_memory("./Hello/Obj/hello.bin");
     reset_proc();
     
     while(i--) {
