@@ -1,9 +1,9 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#define CODE_SIZE   0x2000
+#define CODE_SIZE   0x4000
 
-#define MEM_SIZE  0x6000
+#define MEM_SIZE  0x10000
 
 #define PRINTF(...)  do{ if(0){printf(__VA_ARGS__);} }while(0)
 
@@ -138,6 +138,7 @@ void register_write(uint8_t id, uint32_t val)
 void exception_out(void)
 {
     printf("PC = 0x%x \r\n", register_read(15));
+    getchar();
 }
 
 
@@ -193,7 +194,7 @@ void write_byte(char *mem, unsigned int address, unsigned char data)
         printf("mem overflow error\r\n");
         exception_out();
     }
-    if(address == 0x4004) putchar(data);
+    if(address == 0x8004) putchar(data);
     data_p = (char *) (mem + address);
     *data_p = data;
 }
@@ -435,10 +436,10 @@ void decode(void)
             Pf = (opcode >> 3) & 1; //P bit[24]
             Wf = opcode & 1;  //W bit[21]
             if(Pf) {
-                printf("ldr1 %s%s dst register R%d, [base address at R%d, offset address at %s[R%d(0x%x) %s %d]] %s\r\n",
+                PRINTF("ldr1 %s%s dst register R%d, [base address at R%d, offset address at %s[R%d(0x%x) %s %d]] %s\r\n",
                  Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, register_read(Rm), shift_table[shift], shift_amount, Wf?"!":"");
             } else {
-                printf("ldr1 %s%s dst register R%d, [base address at R%d], offset address at %s[R%d %s %d] \r\n",
+                PRINTF("ldr1 %s%s dst register R%d, [base address at R%d], offset address at %s[R%d %s %d] \r\n",
                  Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, shift_table[shift], shift_amount);
             }
             
@@ -563,39 +564,12 @@ void execute(void)
         rot_num = 0;
         //no need to use shift
         shifter_flag = 0;
-        if(Uf) {
-            add_flag = 1;
-        } else {
-            add_flag = 0;
-        }
-    } else if(code_type == code_is_ldr1) {
+    } else if(code_type == code_is_ldr1 || code_type == code_is_dp0) {
         rot_num = shift_amount;
-        add_flag = 1;
-        if(shift == 0) {
-            //LSL
-        } else if(shift == 1) {
-            //LSR
-            if(shift_amount == 0) {
-                operand2 = 0;
-            }
-        } else if(shift == 2) {
-            //ASR
-            if(shift_amount == 0) {
-                if(IS_SET(operand2, 31)) {
-                    operand2 = 0xffffffff;
-                } else {
-                    operand2 = 0;
-                }
-            }
-        } else {
-            //ROR, RRX
-            if(shift_amount == 0) {
-                operand2 = (cpsr_c << 31) | (operand2 >> 1);
-                rot_num = 0;
-            }
+        if(rot_num == 0 && shift == 3) {
+            //RRX
+            shifter_flag = 2;
         }
-        
-        printf("op1: 0x%x, op2: 0x%x \r\n", operand1, operand2);
     } else if(code_type == code_is_msr1) {
         operand1 = 0;  //msr don't support
         operand2 = immediate;
@@ -610,12 +584,6 @@ void execute(void)
         shift = 3;
         if(rot_num == 0) {
             shifter_flag = 0;
-        }
-    } else if(code_type == code_is_dp0) {
-        rot_num = shift_amount;
-        if(rot_num == 0) {
-            //RRX
-            shifter_flag = 2;
         }
     } else if(code_type == code_is_dp1) {
         //No need to use 
@@ -656,7 +624,7 @@ void execute(void)
             } else if((rot_num&0xff) == 32) {
                 shifter_carry_out = operand2&1;
                 operand2 = 0;
-            } else {
+            } else /* operand2 > 32 */ {
                 shifter_carry_out = 0;
                 operand2 = 0;
             }
@@ -671,19 +639,27 @@ void execute(void)
             } else if((rot_num&0xff) == 32) {
                 shifter_carry_out = IS_SET(operand2, 31);
                 operand2 = 0;
-            } else {
+            } else /* operand2 > 32 */ {
                 shifter_carry_out = 0;
                 operand2 = 0;
             }
             break;
         case 2:
             //ASR
-            
-            operand2 = operand2 >> rot_num;
-            
-            printf("asr error\r\n");
-            getchar();
-            
+            if((rot_num&0xff) == 0) {
+                shifter_carry_out = cpsr_c;
+            } else if((rot_num&0xff) < 32) {
+                shifter_carry_out = IS_SET(operand2, rot_num-1);
+                operand2 = (int32_t)operand2 >> rot_num;
+            } else /* operand2 >= 32 */ {
+                if(!IS_SET(operand2, 31)) {
+                    shifter_carry_out = IS_SET(operand2, 31);
+                    operand2 = 0;
+                } else {
+                    shifter_carry_out = IS_SET(operand2, 31);
+                    operand2 = 0xffffffff;
+                }
+            }
             break;
         case 3:
             //ROR, RRX
@@ -760,7 +736,7 @@ void execute(void)
             operand1 = 0;
             operand2 = ~operand2;
         }
-    } else if(code_type == code_is_ldr1) {
+    } else if(code_type == code_is_ldr1 || code_type == code_is_ldr0) {
         if(Uf) {
             add_flag = 1;
         } else {
@@ -771,8 +747,8 @@ void execute(void)
     uint32_t sum_middle = add_flag?((operand1&0x7fffffff) + (operand2&0x7fffffff) + carry):((operand1&0x7fffffff) - (operand2&0x7fffffff) - carry);
     uint32_t cy_high_bits =  add_flag?(IS_SET(operand1, 31) + IS_SET(operand2, 31) + IS_SET(sum_middle, 31)):(IS_SET(operand1, 31) - IS_SET(operand2, 31) - IS_SET(sum_middle, 31));
     uint32_t aluout = ((cy_high_bits&1) << 31) | (sum_middle&0x7fffffff);
-    uint8_t bit_cy = cy_high_bits>>1;
-    uint8_t bit_ov = bit_cy^IS_SET(sum_middle, 31);
+    uint8_t bit_cy = (cy_high_bits>>1)&1;
+    uint8_t bit_ov = (bit_cy^IS_SET(sum_middle, 31))&1;
     PRINTF("op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", operand1, operand2, carry, aluout);
 
     if(code_type == code_is_ldr0 || code_type == code_is_ldr1) {
@@ -849,6 +825,11 @@ void execute(void)
             }
             
             PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+            
+            if(Rd == 15 && Bit24_23 != 2) {
+                cpsr = spsr[get_cpu_mode_code()];
+                printf("cpsr 0x%x copy from spsr %d \r\n", cpsr, get_cpu_mode_code());
+            }
         }
     } else if(code_type == code_is_bx || code_type == code_is_b) {
         if(Lf) {
@@ -918,7 +899,7 @@ void execute(void)
             }
         }
     } else {
-        printf("unsupport code\r\n");
+        printf("unsupport code %d\r\n", code_type );
         getchar();
     }
     
@@ -941,7 +922,7 @@ void reset_proc(void)
 
 int main()
 {
-    int i = 0x3000;
+    int i = 0x30000;
     
     load_program_memory("./Hello/Obj/hello.bin");
     reset_proc();
@@ -951,7 +932,7 @@ int main()
         decode();
         execute();
         
-        if(register_read(15) > 0xb00) {
+        if(register_read(15) > CODE_SIZE) {
             getchar();
         } else {
             //getchar();
@@ -961,5 +942,4 @@ int main()
     
     return 0;
 }
-
 
