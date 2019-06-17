@@ -142,7 +142,6 @@ void exception_out(void)
 }
 
 
-
 //load_program_memory reads the input memory, and populates the instruction 
 // memory
 void load_program_memory(char *file_name)
@@ -161,7 +160,7 @@ void load_program_memory(char *file_name)
         write_word(MEM, address, instruction);
         address = address + 4;
     }
-    PRINTF("load mem addr = %d \r\n", address);
+    printf("load mem addr = 0x%x \r\n", address);
     fclose(fp);
 }
 
@@ -339,13 +338,18 @@ void decode(void)
                     if(Bit24_23 == 0) {
                         code_type = code_is_mult;
                         if( IS_SET(instruction_word, 21) ) {
-                            PRINTF("mult MUA%s R%d <= R%d * R%d + R%d\r\n", Bit20?"S":"", Rd, Rm, Rs, Rn);
+                            PRINTF("mult MUA%s R%d <= R%d * R%d + R%d\r\n", Bit20?"S":"", Rn, Rm, Rs, Rd);
                         } else {
-                            PRINTF("mult MUL%s R%d <= R%d * R%d\r\n", Bit20?"S":"", Rd, Rm, Rs);
+                            PRINTF("mult MUL%s R%d <= R%d * R%d\r\n", Bit20?"S":"", Rn, Rm, Rs);
                         }
                     } else if(Bit24_23 == 1) {
                         code_type = code_is_multl;
-                        PRINTF("multl \r\n");
+                        PRINTF("multl %sM%s [R%d L, R%d H] %s= R%d * R%d\r\n", Bit22?"S":"U",
+                         IS_SET(instruction_word, 21)?"LAL":"ULL", Rd, Rn, IS_SET(instruction_word, 21)?"+":"", Rm, Rs);
+                        if(Bit22) {
+                            printf("unsupport SMULAL  PC = 0x%x \r\n", register_read(15));
+                            getchar();
+                        }
                     } else if(Bit24_23 == 2) {
                         code_type = code_is_swp;
                         PRINTF("swp \r\n");
@@ -382,15 +386,15 @@ void decode(void)
                     }
                     break;
                 default:
-                    PRINTF("undefed shift\r\n");
+                    printf("undefed shift\r\n");
                 }
                 break;
             default:
-                PRINTF("undefed Bit7\r\n");
+                printf("undefed Bit7\r\n");
             }
             break;
         default:
-            PRINTF("undefed Bit4\r\n");
+            printf("undefed Bit4\r\n");
         }
         break;
     case 1:
@@ -444,7 +448,7 @@ void decode(void)
             }
             
         } else {
-            PRINTF("undefined instruction\r\n");
+            printf("undefined instruction\r\n");
         }
         break;
     case 4:
@@ -478,10 +482,10 @@ void decode(void)
     case 7:
         //software interrupt
         code_type = code_is_swi;
-        PRINTF("swi \r\n");
+        printf("swi \r\n");
         break;
     default:
-        PRINTF("undefed\r\n");
+        printf("undefed\r\n");
     }
 }
 
@@ -492,7 +496,6 @@ void execute(void)
     unsigned int rot_num = register_read(Rs);
     unsigned char cond_satisfy = 0;
     unsigned char add_flag = 1;
-    
     /*
      * 0: turn off shifter
      * 1: turn on shifter
@@ -500,6 +503,7 @@ void execute(void)
     */
     unsigned char shifter_flag = 1;
     unsigned int carry = 0;
+    uint64_t multl_long = 0;
     
     switch(cond) {
     case 0x0:
@@ -604,8 +608,32 @@ void execute(void)
         operand2 = 0;  //increase After
         rot_num = 0;
         shifter_flag = 0;  //no need to use shift
+    } else if(code_type == code_is_mult) {
+        operand2 = operand2 * rot_num;
+        shifter_flag = 0;
+    } else if(code_type == code_is_multl) {
+        multl_long = (uint64_t)operand2 * rot_num;
+        if(opcode&1) {
+            multl_long += ((register_read(Rn) << 32) | register_read(Rd));
+        }
+        
+        register_write(Rn, multl_long >> 32);
+        register_write(Rd, multl_long&0xffffffff);
+        PRINTF("%lld = %d * %d \r\n", multl_long, operand2, rot_num);
+        
+        if(Bit20) {
+            //Update CPSR register
+            uint8_t out_sign = IS_SET(multl_long, 63);
+            
+            cpsr_n_set(out_sign);
+            cpsr_z_set(multl_long == 0);
+            //cv unaffected
+            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+        }
+        
+        return;
     } else {
-        PRINTF("unknow code_type = %d", code_type);
+        printf("unknow code_type = %d", code_type);
         getchar();
     }
     
@@ -742,6 +770,12 @@ void execute(void)
         } else {
             add_flag = 0;
         }
+    } else if(code_type == code_is_mult) {
+        if(opcode == 0) {
+            operand1 = 0;
+        } else if(opcode == 1) {
+            operand1 = register_read(Rd);  //Rd and Rn swap, !!!
+        }
     }
     
     uint32_t sum_middle = add_flag?((operand1&0x7fffffff) + (operand2&0x7fffffff) + carry):((operand1&0x7fffffff) - (operand2&0x7fffffff) - carry);
@@ -809,12 +843,12 @@ void execute(void)
             cpsr_n_set(out_sign);
             cpsr_z_set(aluout == 0);
             
-            if(opcode == 11 || opcode == 4 || opcode == 5 || opcode == 3 || opcode == 7) {
-                //CMN, ADD, ADC, RSB, RSC
+            if(opcode == 11 || opcode == 4 || opcode == 5) {
+                //CMN, ADD, ADC
                 cpsr_c_set( bit_cy );
                 cpsr_v_set( bit_ov );
-            } else if(opcode == 10 || opcode == 2 || opcode == 6) {
-                //CMP, SUB, SBC
+            } else if(opcode == 10 || opcode == 2 || opcode == 6 || opcode == 3 || opcode == 7) {
+                //CMP, SUB, SBC, RSB, RSC
                 cpsr_c_set( !bit_cy );
                 cpsr_v_set( bit_ov );
             } else if(shifter_flag) {
@@ -831,6 +865,20 @@ void execute(void)
                 printf("cpsr 0x%x copy from spsr %d \r\n", cpsr, get_cpu_mode_code());
             }
         }
+    } else if(code_type == code_is_mult) {
+        register_write(Rn, aluout);   //Rd and Rn swap, !!!
+        PRINTF("write register R%d = 0x%x\r\n", Rn, aluout);
+        
+        if(Bit20) {
+            //Update CPSR register
+            uint8_t out_sign = IS_SET(aluout, 31);
+            
+            cpsr_n_set(out_sign);
+            cpsr_z_set(aluout == 0);
+            //cv unaffected
+            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+        }
+        
     } else if(code_type == code_is_bx || code_type == code_is_b) {
         if(Lf) {
             register_write(14, register_read(15) - 4);  //LR register
@@ -900,7 +948,6 @@ void execute(void)
         }
     } else {
         printf("unsupport code %d\r\n", code_type );
-        getchar();
     }
     
 }
@@ -915,14 +962,14 @@ void reset_proc(void)
     for(i=0; i<16; i++) {
         register_write(i, 0);
     }
-    for(i=0x2000; i<0x4000; i++) {
-        MEM[i]=0;
+    for(i = CODE_SIZE; i < CODE_SIZE + 0x4000; i++) {
+        MEM[i] = 0;
     }
 }
 
 int main()
 {
-    int i = 0x30000;
+    int i = 0x5000;
     
     load_program_memory("./Hello/Obj/hello.bin");
     reset_proc();
@@ -939,6 +986,17 @@ int main()
         }
         
     }
+    
+    printf("\r\n---------------test code -----------\r\n");
+    float pi = 3.14159;
+    float sin45f;
+    for(int i=48; i<=180; i += 4) {
+        sin45f = cos(i * pi/180);
+        printf("cos(%d) =%.4f \r\n", i, sin45f);
+    }
+    
+    float fe = exp(1);
+    printf("exp(1) = %f \r\n", fe);
     
     return 0;
 }
