@@ -135,6 +135,13 @@ void register_write(uint8_t id, uint32_t val)
 }
 
 
+void exception_out(void)
+{
+    printf("PC = 0x%x \r\n", register_read(15));
+}
+
+
+
 //load_program_memory reads the input memory, and populates the instruction 
 // memory
 void load_program_memory(char *file_name)
@@ -144,7 +151,7 @@ void load_program_memory(char *file_name)
     fp = fopen(file_name, "rb");
     if(fp == NULL) {
         PRINTF("Error opening input mem file\n");
-        exit(1);
+        exception_out();
     }
     address = 0;
     PRINTF("load mem addr = %d \r\n", address);
@@ -161,8 +168,8 @@ int read_word(char *mem, unsigned int address)
 {
     int *data;
     if(address >= MEM_SIZE) {
-        printf("mem overflow error\r\n");
-        exit(1);
+        printf("mem read_word overflow error 0x%x\r\n", address);
+        exception_out();
     }
     data =  (int*) (mem + address);
     return *data;
@@ -173,7 +180,7 @@ void write_word(char *mem, unsigned int address, unsigned int data)
     int *data_p;
     if(address >= MEM_SIZE) {
         printf("mem overflow error\r\n");
-        exit(1);
+        exception_out();
     }
     data_p = (int*) (mem + address);
     *data_p = data;
@@ -184,7 +191,7 @@ void write_byte(char *mem, unsigned int address, unsigned char data)
     char *data_p;
     if(address >= MEM_SIZE) {
         printf("mem overflow error\r\n");
-        exit(1);
+        exception_out();
     }
     if(address == 0x4004) putchar(data);
     data_p = (char *) (mem + address);
@@ -200,7 +207,7 @@ void fetch(void)
     
     if(register_read(15) >= CODE_SIZE) {
         PRINTF("[FETCH] error, code overflow \r\n");
-        getchar();
+        exception_out();
     }
 }
 
@@ -484,6 +491,13 @@ void execute(void)
     unsigned int rot_num = register_read(Rs);
     unsigned char cond_satisfy = 0;
     unsigned char add_flag = 1;
+    
+    /*
+     * 0: turn off shifter
+     * 1: turn on shifter
+     * 2: if(shift == 3) use rrx
+    */
+    unsigned char shifter_flag = 1;
     unsigned int carry = 0;
     
     switch(cond) {
@@ -547,7 +561,8 @@ void execute(void)
     if(code_type == code_is_ldr0) {
         operand2 = immediate;
         rot_num = 0;
-        shift = 0;  //no need to use shift
+        //no need to use shift
+        shifter_flag = 0;
         if(Uf) {
             add_flag = 1;
         } else {
@@ -586,27 +601,41 @@ void execute(void)
         operand2 = immediate;
         rot_num = rotate_imm<<1;
         shift = 3;
+        if(rot_num == 0) {
+            shifter_flag = 0;
+        }
     } else if(code_type == code_is_dp2) {
         operand2 = immediate;
         rot_num = rotate_imm<<1;
         shift = 3;
+        if(rot_num == 0) {
+            shifter_flag = 0;
+        }
     } else if(code_type == code_is_dp0) {
         rot_num = shift_amount;
+        if(rot_num == 0) {
+            //RRX
+            shifter_flag = 2;
+        }
     } else if(code_type == code_is_dp1) {
         //No need to use 
+        if(rot_num == 0) {
+            shifter_flag = 0;
+        }
     } else if(code_type == code_is_bx) {
         operand1 = 0;
         rot_num = 0;
-        shift = 0;  //no need to use shift
+        //no need to use shift
+        shifter_flag = 0;
     } else if(code_type == code_is_b) {
         operand1 = b_offset;
         operand2 = register_read(15);
         rot_num = 0;
-        shift = 0;  //no need to use shift
+        shifter_flag = 0;  //no need to use shift
     } else if(code_type == code_is_ldm) {
         operand2 = 0;  //increase After
         rot_num = 0;
-        shift = 0;  //no need to use shift
+        shifter_flag = 0;  //no need to use shift
     } else {
         PRINTF("unknow code_type = %d", code_type);
         getchar();
@@ -614,30 +643,72 @@ void execute(void)
     
     /******************shift**********************/
     //operand2 << rot_num
-    
-    switch(shift) {
-    case 0:
-        //LSL
-        operand2 = operand2 << rot_num;
-        break;
-    case 1:
-        //LSR
-        operand2 = operand2 >> rot_num;
-        break;
-    case 2:
-        //ASR
-        
-        operand2 = operand2 >> rot_num;
-        break;
-    case 3:
-        //ROR, RRX
-        //ROR
-        operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
-        break;
+    uint8_t shifter_carry_out = 0;
+    if(shifter_flag) {
+        switch(shift) {
+        case 0:
+            //LSL
+            if((rot_num&0xff) == 0) {
+                shifter_carry_out = cpsr_c;
+            } else if((rot_num&0xff) < 32) {
+                shifter_carry_out = IS_SET(operand2, rot_num-1);
+                operand2 = operand2 << rot_num;
+            } else if((rot_num&0xff) == 32) {
+                shifter_carry_out = operand2&1;
+                operand2 = 0;
+            } else {
+                shifter_carry_out = 0;
+                operand2 = 0;
+            }
+            break;
+        case 1:
+            //LSR
+            if((rot_num&0xff) == 0) {
+                shifter_carry_out = cpsr_c;
+            } else if((rot_num&0xff) < 32) {
+                shifter_carry_out = IS_SET(operand2, rot_num-1);
+                operand2 = operand2 >> rot_num;
+            } else if((rot_num&0xff) == 32) {
+                shifter_carry_out = IS_SET(operand2, 31);
+                operand2 = 0;
+            } else {
+                shifter_carry_out = 0;
+                operand2 = 0;
+            }
+            break;
+        case 2:
+            //ASR
+            
+            operand2 = operand2 >> rot_num;
+            
+            printf("asr error\r\n");
+            getchar();
+            
+            break;
+        case 3:
+            //ROR, RRX
+            //ROR
+            if(shifter_flag == 2) {
+                //RRX, 5.1.13 Rotate right with extend
+                shifter_carry_out = operand2&1;
+                operand2 = (cpsr_c << 31) | (operand2 >> 1);
+            } else {
+                //ROR
+                if((rot_num&0xff) == 0) {
+                    shifter_carry_out = cpsr_c;
+                } else if((rot_num&0x1f) == 0) {
+                    shifter_carry_out = IS_SET(operand2, 31);
+                } else /* rot_num > 0 */ {
+                    shifter_carry_out = IS_SET(operand2, rot_num-1);
+                    operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
+                }
+            }
+            break;
+        }
     }
     
     
-    /******************shift**********************/
+    /******************shift end*******************/
     
     if(code_type == code_is_dp0 || code_type == code_is_dp1 || code_type == code_is_dp2) {
         if(opcode == 0 || opcode == 8) {
@@ -685,7 +756,7 @@ void execute(void)
             operand1 &= ~operand2;
             operand2 = 0;
         } else if(opcode == 15) {
-            //MNV
+            //MVN
             operand1 = 0;
             operand2 = ~operand2;
         }
@@ -763,16 +834,18 @@ void execute(void)
             cpsr_z_set(aluout == 0);
             
             if(opcode == 11 || opcode == 4 || opcode == 5 || opcode == 3 || opcode == 7) {
+                //CMN, ADD, ADC, RSB, RSC
                 cpsr_c_set( bit_cy );
                 cpsr_v_set( bit_ov );
             } else if(opcode == 10 || opcode == 2 || opcode == 6) {
+                //CMP, SUB, SBC
                 cpsr_c_set( !bit_cy );
                 cpsr_v_set( bit_ov );
-            } else {
-                cpsr_c_set( 0 );
-                cpsr_v_set( 0 );
-                printf("bug \r\n");
-                getchar();
+            } else if(shifter_flag) {
+                //TST, TEQ, ORR, MOV, MVN
+                cpsr_c_set( shifter_carry_out );
+                //c shifter_carry_out
+                //v unaffected
             }
             
             PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
