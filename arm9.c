@@ -386,14 +386,17 @@ void decode(void)
                     }
                     break;
                 default:
+                    code_type = code_is_unknow;
                     printf("undefed shift\r\n");
                 }
                 break;
             default:
+                code_type = code_is_unknow;
                 printf("undefed Bit7\r\n");
             }
             break;
         default:
+            code_type = code_is_unknow;
             printf("undefed Bit4\r\n");
         }
         break;
@@ -448,6 +451,7 @@ void decode(void)
             }
             
         } else {
+            code_type = code_is_unknow;
             printf("undefined instruction\r\n");
         }
         break;
@@ -477,7 +481,8 @@ void decode(void)
         break;
     case 6:
         //Coprocessor load/store and double register transfers
-        PRINTF("Coprocessor todo... \r\n");
+        code_type = code_is_unknow;
+        printf("Coprocessor todo... \r\n");
         break;
     case 7:
         //software interrupt
@@ -485,6 +490,7 @@ void decode(void)
         printf("swi \r\n");
         break;
     default:
+        code_type = code_is_unknow;
         printf("undefed\r\n");
     }
 }
@@ -815,6 +821,11 @@ void execute(void)
             PRINTF("[LDR]write register R%d = 0x%x\r\n", Rn, aluout);
         }
         
+        if(!Pf && Wf) {
+            printf("bug ldr\r\n");
+            getchar();
+        }
+        
     } else if(code_type == code_is_msr1 || code_type == code_is_msr0) {
         if(!Bit22) {
             if(IS_SET(Rn, 0) )
@@ -884,7 +895,12 @@ void execute(void)
             register_write(14, register_read(15) - 4);  //LR register
             PRINTF("write register R%d = 0x%0x, ", 14, register_read(14));
         }
-        register_write(15, aluout & 0xfffffffe);  //PC register
+        
+        if(aluout&3) {
+            printf("thumb unsupport \r\n");
+            getchar();
+        }
+        register_write(15, aluout & 0xfffffffc);  //PC register
         PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
     } else if(code_type == code_is_ldm) {
         if(Lf) { //bit [20]
@@ -967,9 +983,26 @@ void reset_proc(void)
     }
 }
 
+
+double nResult(double x,double n)
+{
+    //(n^2n+1)/(2n+1)!也就是n/1*n/2*n/3*n/4*.....n/(2n+1)
+    return n==1?x:nResult(x,n-1)*x/n;
+}
+
+double ssin(double x)
+{
+    //sin(x)=x-x^3/3!+x^5/5!-x^7/7!+……+(-1)(n^2n+1)/(2n+1)!+……
+    int i=0;
+    double result=0,n=0;
+    while( fabs( n=nResult(x,2*++i-1) ) > 0e-3 )//绝对值大于10^-5次方就循环
+        result+=(i%2==1)?n:-n;
+    return result;
+}
+
 int main()
 {
-    int i = 0x5000;
+    int i = 0x40000;
     
     load_program_memory("./Hello/Obj/hello.bin");
     reset_proc();
@@ -988,6 +1021,19 @@ int main()
     }
     
     printf("\r\n---------------test code -----------\r\n");
+    
+    double lld = ssin(3.1415*2);
+    
+    printf(" %f rr\r\n", lld );
+    lld = ssin(3.1415*2);
+    
+    printf(" %f rr\r\n", lld );
+    
+    
+    /*
+    float fe = exp(1);
+    printf("exp(1) = %f \r\n", fe);
+    
     float pi = 3.14159;
     float sin45f;
     for(int i=48; i<=180; i += 4) {
@@ -995,8 +1041,7 @@ int main()
         printf("cos(%d) =%.4f \r\n", i, sin45f);
     }
     
-    float fe = exp(1);
-    printf("exp(1) = %f \r\n", fe);
+    printf("main = %p \r\n", main);*/
     
     return 0;
 }
