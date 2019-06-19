@@ -333,6 +333,11 @@ void decode(void)
                 break;
             case 1:
                 //Multiplies, extra load/stores
+                Lf = (instruction_word&0x100000)>>20; //L bit
+                Bf = (instruction_word&0x400000)>>22; //B bit
+                Uf = (instruction_word&0x800000) >> 23;  //U bit
+                Pf = (opcode >> 3) & 1; //P bit[24]
+                Wf = opcode & 1;  //W bit[21]
                 switch(shift) {
                 case 0:
                     if(Bit24_23 == 0) {
@@ -359,30 +364,57 @@ void decode(void)
                     //code_is_ldrh
                     if(Bit22) {
                         code_type = code_is_ldrh1;
-                        PRINTF("ldrh1 \r\n");
+                        immediate = (Rs << 4) | Rm;
+                        if(Pf) {
+                            PRINTF("ldrh1 %sH R%d, [R%d, immediate %s#%d] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
+                        } else {
+                            PRINTF("ldrh1 %sH R%d, [R%d], immediate %s#%d %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
+                        }
                     } else {
                         code_type = code_is_ldrh0;
-                        PRINTF("ldrh0 \r\n");
+                        if(Pf) {
+                            PRINTF("ldrh0 %sH R%d, [R%d, %s[R%d] ] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+                        } else {
+                            PRINTF("ldrh0 %sH R%d, [R%d], %s[R%d] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+                        }
                     }
                     break;
                 case 2:
                     //code_is_ldrsb
                     if(Bit22) {
                         code_type = code_is_ldrsb1;
-                        PRINTF("ldrsb1 \r\n");
+                        immediate = (Rs << 4) | Rm;
+                        if(Pf) {
+                            PRINTF("ldrsb1 %sSB R%d, [R%d, immediate %s#%d] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
+                        } else {
+                            PRINTF("ldrsb1 %sSB R%d, [R%d], immediate %s#%d %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
+                        }
                     } else {
                         code_type = code_is_ldrsb0;
-                        PRINTF("ldrsb0 \r\n");
+                        if(Pf) {
+                            PRINTF("ldrsb0 %sSB R%d, [R%d, %s[R%d] ] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+                        } else {
+                            PRINTF("ldrsb0 %sSB R%d, [R%d], %s[R%d] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+                        }
                     }
                     break;
                 case 3:
                     //code_is_ldrsh
                     if(Bit22) {
                         code_type = code_is_ldrsh1;
-                        PRINTF("ldrsh1 \r\n");
+                        immediate = (Rs << 4) | Rm;
+                        if(Pf) {
+                            PRINTF("ldrsh1 %sSH R%d, [R%d, immediate %s#%d] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
+                        } else {
+                            PRINTF("ldrsh1 %sSH R%d, [R%d], immediate %s#%d %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
+                        }
                     } else {
                         code_type = code_is_ldrsh0;
-                        PRINTF("ldrsh0 \r\n");
+                        if(Pf) {
+                            PRINTF("ldrsh0 %sSH R%d, [R%d, %s[R%d] ] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+                        } else {
+                            PRINTF("ldrsh0 %sSH R%d, [R%d], %s[R%d] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+                        }
                     }
                     break;
                 default:
@@ -569,9 +601,11 @@ void execute(void)
         return;
     }
     
-    if(code_type == code_is_ldr0) {
+    if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsh1 || code_type == code_is_ldrh1 || code_type == code_is_ldr0) {
         operand2 = immediate;
-        rot_num = 0;
+        //no need to use shift
+        shifter_flag = 0;
+    } else if(code_type == code_is_ldrsb0 || code_type == code_is_ldrsh0 || code_type == code_is_ldrh0) {
         //no need to use shift
         shifter_flag = 0;
     } else if(code_type == code_is_ldr1 || code_type == code_is_dp0) {
@@ -770,7 +804,10 @@ void execute(void)
             operand1 = 0;
             operand2 = ~operand2;
         }
-    } else if(code_type == code_is_ldr1 || code_type == code_is_ldr0) {
+    } else if(code_type == code_is_ldr1 || code_type == code_is_ldr0 || 
+            code_type == code_is_ldrsb1 || code_type == code_is_ldrsh1 || code_type == code_is_ldrh1 ||
+            code_type == code_is_ldrsb0 || code_type == code_is_ldrsh0 || code_type == code_is_ldrh0 )
+    {
         if(Uf) {
             add_flag = 1;
         } else {
@@ -791,7 +828,10 @@ void execute(void)
     uint8_t bit_ov = (bit_cy^IS_SET(sum_middle, 31))&1;
     PRINTF("op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", operand1, operand2, carry, aluout);
 
-    if(code_type == code_is_ldr0 || code_type == code_is_ldr1) {
+    if(code_type == code_is_ldr0 || code_type == code_is_ldr1 ||
+       code_type == code_is_ldrsb1 || code_type == code_is_ldrsh1 || code_type == code_is_ldrh1 ||
+       code_type == code_is_ldrsb0 || code_type == code_is_ldrsh0 || code_type == code_is_ldrh0 )
+    {
         uint32_t address = operand1;  //Rn
         if(Pf) {
             //first add
@@ -799,21 +839,60 @@ void execute(void)
         }
         if(Lf) {
             //LDR
-            if(Bf) {
+            if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
+                //Halfword
+                register_write(Rd, read_word(MEM, address) & 0xffff);
+            } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
+                //Halfword Signed
+                uint32_t data = read_word(MEM, address) & 0xffff;
+                if(data&0x8000) {
+                    data |= 0xffff0000;
+                } else {
+                    data &= 0x0000ffff;
+                }
+                register_write(Rd, data);
+                
+            } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
+                //Byte Signed
+                uint32_t data = read_word(MEM, address) & 0xff;
+                if(data&0x80) {
+                    data |= 0xffffff00;
+                } else {
+                    data &= 0x000000ff;
+                }
+                register_write(Rd, data);
+                
+            } else if(Bf) {
                 //Byte
                 register_write(Rd, read_word(MEM, address) & 0xff);
             } else {
+                //Word
                 register_write(Rd, read_word(MEM, address));
             }
             PRINTF("load data [0x%x]:0x%x to R%d \r\n", address, register_read(Rd), Rd);
         } else {
             //STR
-            if(Bf) {
+            if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
+                //Halfword
+                write_byte(MEM, address, register_read(Rd) & 0xffff);
+                PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  register_read(Rd) & 0xffff, address);
+            } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
+                //Halfword Signed
+                uint16_t data = register_read(Rd) & 0xffff;
+                write_byte(MEM, address, data);
+                PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  data, address);
+            } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
+                //Byte Signed
+                uint8_t data = register_read(Rd) & 0xff;
+                write_byte(MEM, address, data);
+                PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  data, address);
+            } else if(Bf) {
                 write_byte(MEM, address, register_read(Rd) & 0xff);
+                PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  register_read(Rd) & 0xff, address);
             } else {
                 write_word(MEM, address, register_read(Rd));
+                PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd, register_read(Rd), address);
             }
-            PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd, register_read(Rd) & (Bf?0xff:0xffffffff), address);
         }
         if(!(!Wf && Pf)) {
             //Update base register
@@ -1022,7 +1101,7 @@ int main()
     
     printf("\r\n---------------test code -----------\r\n");
     
-    double lld = ssin(3.1415*2);
+    double lld = sin(3.1415*2);
     
     printf(" %f rr\r\n", lld );
     lld = ssin(3.1415*2);
