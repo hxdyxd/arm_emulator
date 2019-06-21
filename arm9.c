@@ -1,5 +1,7 @@
 #include <stdio.h>
 #include <stdint.h>
+#include <time.h>
+#include <math.h>
 
 #define CODE_SIZE   0x4000
 
@@ -10,7 +12,7 @@
 #define  IS_SET(v, bit) ( ((v)>>(bit))&1 )
 
 
-static unsigned int spsr[7] = {0, };
+unsigned int spsr[7] = {0, };
 #define  cpsr    spsr[0]
 
 
@@ -60,7 +62,7 @@ const char *shift_table[4] = {
 
 
 //register function
-static unsigned int Register[7][16];
+unsigned int Register[7][16];
 #define   CPU_MODE_USER      0
 #define   CPU_MODE_FIQ       1
 #define   CPU_MODE_IRQ       2
@@ -105,10 +107,10 @@ uint8_t get_cpu_mode_code(void)
 uint32_t register_read(uint8_t id)
 {
     //Register file
-    if(id == 15) {
-        return Register[CPU_MODE_USER][id] + 4;
-    } else if(id < 8) {
+    if(id < 8) {
         return Register[CPU_MODE_USER][id];
+    } else if(id == 15) {
+        return Register[CPU_MODE_USER][id] + 4;
     } else if(cpsr_m == CPSR_M_USR || cpsr_m == CPSR_M_SYS) {
         return Register[CPU_MODE_USER][id];
     } else if(cpsr_m != CPSR_M_FIQ && id < 13) {
@@ -142,28 +144,6 @@ void exception_out(void)
 }
 
 
-//load_program_memory reads the input memory, and populates the instruction 
-// memory
-void load_program_memory(char *file_name)
-{
-    FILE *fp;
-    unsigned int address, instruction;
-    fp = fopen(file_name, "rb");
-    if(fp == NULL) {
-        PRINTF("Error opening input mem file\n");
-        exception_out();
-    }
-    address = 0;
-    PRINTF("load mem addr = %d \r\n", address);
-    while(!feof(fp)) {
-        fread(&instruction, 4, 1, fp);
-        write_word(MEM, address, instruction);
-        address = address + 4;
-    }
-    printf("load mem addr = 0x%x \r\n", address);
-    fclose(fp);
-}
-
 int read_word(char *mem, unsigned int address)
 {
     int *data;
@@ -171,6 +151,12 @@ int read_word(char *mem, unsigned int address)
         printf("mem read_word overflow error 0x%x\r\n", address);
         exception_out();
     }
+    
+    if(address == 0x8020) {
+        uint32_t clk1ms = (clock()*1000/CLOCKS_PER_SEC);
+        return clk1ms;
+    }
+    
     data =  (int*) (mem + address);
     return *data;
 }
@@ -198,17 +184,39 @@ void write_byte(char *mem, unsigned int address, unsigned char data)
     *data_p = data;
 }
 
+
+//load_program_memory reads the input memory, and populates the instruction 
+// memory
+void load_program_memory(char *file_name)
+{
+    FILE *fp;
+    unsigned int address, instruction;
+    fp = fopen(file_name, "rb");
+    if(fp == NULL) {
+        PRINTF("Error opening input mem file\n");
+        exception_out();
+    }
+    address = 0;
+    PRINTF("load mem addr = %d \r\n", address);
+    while(!feof(fp)) {
+        fread(&instruction, 4, 1, fp);
+        write_word(MEM, address, instruction);
+        address = address + 4;
+    }
+    printf("load mem addr = 0x%x \r\n", address);
+    fclose(fp);
+}
+
 void fetch(void)
 {
-    instruction_word = read_word(MEM, register_read(15) - 4);
-    //PRINTF("FETCH: Fetch instruction 0x%x from address 0x%x\n", instruction_word, R[15]);
-    PRINTF("[0x%04x]: ", register_read(15) - 4 );
-    register_write(15, register_read(15) );
-    
-    if(register_read(15) >= CODE_SIZE) {
+    if(register_read(15) - 4 >= CODE_SIZE) {
         PRINTF("[FETCH] error, code overflow \r\n");
         exception_out();
     }
+    
+    instruction_word = read_word(MEM, register_read(15) - 4);
+    PRINTF("[0x%04x]: ", register_read(15) - 4 );
+    register_write(15, register_read(15) );
 }
 
 #define  code_is_swi      1
@@ -541,7 +549,6 @@ void execute(void)
     */
     unsigned char shifter_flag = 1;
     unsigned int carry = 0;
-    uint64_t multl_long = 0;
     
     switch(cond) {
     case 0x0:
@@ -652,9 +659,9 @@ void execute(void)
         operand2 = operand2 * rot_num;
         shifter_flag = 0;
     } else if(code_type == code_is_multl) {
-        multl_long = (uint64_t)operand2 * rot_num;
+        uint64_t multl_long = (uint64_t)operand2 * rot_num;
         if(opcode&1) {
-            multl_long += ((register_read(Rn) << 32) | register_read(Rd));
+            multl_long += ( ((uint64_t)register_read(Rn) << 32) | register_read(Rd));
         }
         
         register_write(Rn, multl_long >> 32);
@@ -824,8 +831,6 @@ void execute(void)
     uint32_t sum_middle = add_flag?((operand1&0x7fffffff) + (operand2&0x7fffffff) + carry):((operand1&0x7fffffff) - (operand2&0x7fffffff) - carry);
     uint32_t cy_high_bits =  add_flag?(IS_SET(operand1, 31) + IS_SET(operand2, 31) + IS_SET(sum_middle, 31)):(IS_SET(operand1, 31) - IS_SET(operand2, 31) - IS_SET(sum_middle, 31));
     uint32_t aluout = ((cy_high_bits&1) << 31) | (sum_middle&0x7fffffff);
-    uint8_t bit_cy = (cy_high_bits>>1)&1;
-    uint8_t bit_ov = (bit_cy^IS_SET(sum_middle, 31))&1;
     PRINTF("op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", operand1, operand2, carry, aluout);
 
     if(code_type == code_is_ldr0 || code_type == code_is_ldr1 ||
@@ -901,24 +906,10 @@ void execute(void)
         }
         
         if(!Pf && Wf) {
-            printf("bug ldr\r\n");
+            printf("UNSUPPORT LDRT\r\n");
             getchar();
         }
         
-    } else if(code_type == code_is_msr1 || code_type == code_is_msr0) {
-        if(!Bit22) {
-            if(IS_SET(Rn, 0) )
-                cpsr |= aluout&0xff;
-            if(IS_SET(Rn, 1) )
-                cpsr |= aluout&0xff00;
-            if(IS_SET(Rn, 2) )
-                cpsr |= aluout&0xff0000;
-            if(IS_SET(Rn, 3) )
-                cpsr |= aluout&0xff000000;
-            PRINTF("write register cpsr = 0x%x\r\n", cpsr);
-        } else {
-            PRINTF("spsr not support todo...\r\n");
-        }
     } else if(code_type == code_is_dp0 || code_type == code_is_dp1 ||  code_type == code_is_dp2) {
         if(Bit24_23 == 2) {
             PRINTF("update flag only \r\n");
@@ -932,6 +923,9 @@ void execute(void)
             
             cpsr_n_set(out_sign);
             cpsr_z_set(aluout == 0);
+            
+            uint8_t bit_cy = (cy_high_bits>>1)&1;
+            uint8_t bit_ov = (bit_cy^IS_SET(sum_middle, 31))&1;
             
             if(opcode == 11 || opcode == 4 || opcode == 5) {
                 //CMN, ADD, ADC
@@ -955,20 +949,6 @@ void execute(void)
                 printf("cpsr 0x%x copy from spsr %d \r\n", cpsr, get_cpu_mode_code());
             }
         }
-    } else if(code_type == code_is_mult) {
-        register_write(Rn, aluout);   //Rd and Rn swap, !!!
-        PRINTF("write register R%d = 0x%x\r\n", Rn, aluout);
-        
-        if(Bit20) {
-            //Update CPSR register
-            uint8_t out_sign = IS_SET(aluout, 31);
-            
-            cpsr_n_set(out_sign);
-            cpsr_z_set(aluout == 0);
-            //cv unaffected
-            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
-        }
-        
     } else if(code_type == code_is_bx || code_type == code_is_b) {
         if(Lf) {
             register_write(14, register_read(15) - 4);  //LR register
@@ -1041,6 +1021,34 @@ void execute(void)
                 PRINTF("[STM] write R%d = 0x%0x \r\n", Rn, address);
             }
         }
+    } else if(code_type == code_is_msr1 || code_type == code_is_msr0) {
+        if(!Bit22) {
+            if(IS_SET(Rn, 0) )
+                cpsr |= aluout&0xff;
+            if(IS_SET(Rn, 1) )
+                cpsr |= aluout&0xff00;
+            if(IS_SET(Rn, 2) )
+                cpsr |= aluout&0xff0000;
+            if(IS_SET(Rn, 3) )
+                cpsr |= aluout&0xff000000;
+            PRINTF("write register cpsr = 0x%x\r\n", cpsr);
+        } else {
+            PRINTF("spsr not support todo...\r\n");
+        }
+    } else if(code_type == code_is_mult) {
+        register_write(Rn, aluout);   //Rd and Rn swap, !!!
+        PRINTF("write register R%d = 0x%x\r\n", Rn, aluout);
+        
+        if(Bit20) {
+            //Update CPSR register
+            uint8_t out_sign = IS_SET(aluout, 31);
+            
+            cpsr_n_set(out_sign);
+            cpsr_z_set(aluout == 0);
+            //cv unaffected
+            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+        }
+        
     } else {
         printf("unsupport code %d\r\n", code_type );
     }
@@ -1063,64 +1071,62 @@ void reset_proc(void)
 }
 
 
-double nResult(double x,double n)
+
+float nResult(float x, float n)
 {
     //(n^2n+1)/(2n+1)!也就是n/1*n/2*n/3*n/4*.....n/(2n+1)
-    return n==1?x:nResult(x,n-1)*x/n;
+    return (n==1)?x:(nResult(x,n-1)*x/n);
 }
 
 double ssin(double x)
 {
     //sin(x)=x-x^3/3!+x^5/5!-x^7/7!+……+(-1)(n^2n+1)/(2n+1)!+……
     int i=0;
-    double result=0,n=0;
-    while( fabs( n=nResult(x,2*++i-1) ) > 0e-3 )//绝对值大于10^-5次方就循环
+    double result=0, n=0;
+    while( fabs( n=nResult(x,2*++i-1) ) > 0e-5 ) {//绝对值大于10^-5次方就循环
         result+=(i%2==1)?n:-n;
+        //printf("%d %f \r\n", i, n);
+    }
     return result;
 }
 
 int main()
 {
-    int i = 0x40000;
+    int i = 0x4000000;
+    uint32_t code_counter = 0;
+    uint32_t counter = 0;
+    uint32_t last_counter = 0;
     
     load_program_memory("./Hello/Obj/hello.bin");
     reset_proc();
     
-    while(i--) {
+    while(i) {
         fetch();
         decode();
         execute();
         
-        if(register_read(15) > CODE_SIZE) {
-            getchar();
-        } else {
-            //getchar();
+        code_counter++;
+        counter = (clock()*1000/CLOCKS_PER_SEC);
+        if(counter - last_counter >= 2000) {
+            printf("rate = %.1f \r\n", code_counter/2000.0 );
+            last_counter = counter;
+            code_counter = 0;
         }
-        
     }
     
-    printf("\r\n---------------test code -----------\r\n");
-    
-    double lld = sin(3.1415*2);
-    
-    printf(" %f rr\r\n", lld );
-    lld = ssin(3.1415*2);
-    
-    printf(" %f rr\r\n", lld );
-    
-    
-    /*
-    float fe = exp(1);
-    printf("exp(1) = %f \r\n", fe);
+/*    printf("\r\n---------------test code -----------\r\n");
     
     float pi = 3.14159;
     float sin45f;
-    for(int i=48; i<=180; i += 4) {
-        sin45f = cos(i * pi/180);
-        printf("cos(%d) =%.4f \r\n", i, sin45f);
+    for(int i=0; i<=360; i += 4) {
+        sin45f = ssin(i * pi/180);
+        printf("ssin(%d) =%.4f \r\n", i, sin45f);
     }
     
-    printf("main = %p \r\n", main);*/
+    float lld = sqrt(3.1415*2);
+    printf(" %f rr\r\n", lld );
+*/
+    
     
     return 0;
 }
