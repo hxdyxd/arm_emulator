@@ -100,6 +100,7 @@ uint8_t get_cpu_mode_code(void)
     default:
         cpu_mode = 0;
         PRINTF("cpu mode is unknown %x\r\n", cpsr_m);
+        getchar();
     }
     return cpu_mode;
 }
@@ -148,7 +149,7 @@ int read_word(char *mem, unsigned int address)
 {
     int *data;
     if(address >= MEM_SIZE) {
-        printf("mem read_word overflow error 0x%x\r\n", address);
+        printf("mem overflow error, read 0x%x\r\n", address);
         exception_out();
     }
     
@@ -165,7 +166,7 @@ void write_word(char *mem, unsigned int address, unsigned int data)
 {
     int *data_p;
     if(address >= MEM_SIZE) {
-        printf("mem overflow error\r\n");
+        printf("mem overflow error, write 0x%0x\r\n", address);
         exception_out();
     }
     data_p = (int*) (mem + address);
@@ -176,7 +177,7 @@ void write_byte(char *mem, unsigned int address, unsigned char data)
 {
     char *data_p;
     if(address >= MEM_SIZE) {
-        printf("mem overflow error\r\n");
+        printf("mem overflow error, write byte 0x%0x\r\n", address);
         exception_out();
     }
     if(address == 0x8004) putchar(data);
@@ -679,6 +680,8 @@ void execute(void)
         }
         
         return;
+    } else if(code_type == code_is_mrs) {
+        shifter_flag = 0;  //no need to use shift
     } else {
         printf("unknow code_type = %d", code_type);
         getchar();
@@ -1049,6 +1052,15 @@ void execute(void)
             PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
         }
         
+    } else if(code_type == code_is_mrs) {
+        if(Bit22) {
+            uint8_t mode = get_cpu_mode_code();
+            register_write(Rd, spsr[mode]);
+            PRINTF("write register R%d = [spsr]0x%x\r\n", Rd, spsr[mode]);
+        } else {
+            register_write(Rd, cpsr);
+            PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr);
+        }
     } else {
         printf("unsupport code %d\r\n", code_type );
     }

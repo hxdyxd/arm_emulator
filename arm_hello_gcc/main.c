@@ -1,39 +1,28 @@
+#include <stdint.h>
+#include <stdio.h>
 
-#define CR     0x0D
-
-#define SERIAL_FLAG *(volatile unsigned char *) (0x8000)
-#define SERIAL_OUT *(volatile unsigned char *) (0x8004)
-#define SERIAL_IN *(volatile unsigned char *) (0x8008)
-
-
-/* implementation of putchar (also used by printf function to output data)    */
-int sendchar(int ch)                 /* Write character to Serial Port    */
-{
-    if (ch == '\n')  {
-        while (SERIAL_FLAG & 0x01);
-        SERIAL_OUT = CR;                          /* output CR */
-    }
-    while (SERIAL_FLAG & 0x01);
-    return (SERIAL_OUT = ch);
-}
-
+static int gs_para = 0;
 
 int main(void)
 {
-    long int num = 12;
+    uint64_t num = 12;
     num /= 2;
     double doub = 1.234567;
-    // doub += doub;
-    // doub *= doub;
-    // doub -= doub;
-    // doub /= doub;
+    doub += doub;
+    doub *= doub;
+    doub -= doub;
+    doub /= doub;
+    gs_para = 12;
+    gs_para += 13;
+    printf("helloworld\r\n");
+    printf("hello world, %f\r\n", gs_para + doub + num);
 
     while(1) {
-        sendchar('t');
-        sendchar('e');
-        sendchar('s');
-        sendchar('t');
-        sendchar('\n');
+        uart_sendchar('t');
+        uart_sendchar('e');
+        uart_sendchar('s');
+        uart_sendchar('t');
+        uart_sendchar('\n');
     }
 
 }

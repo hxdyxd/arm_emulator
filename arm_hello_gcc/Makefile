@@ -5,7 +5,7 @@
 TARGET = hello
 
 # optimization
-OPT = -O2
+OPT = -O0
 
 #######################################
 # paths
@@ -27,10 +27,11 @@ BIN = $(OBJCOPY) -O binary -S
 CPU = -mcpu=arm926ej-s
 FLOAT-ABI = -mfloat-abi=soft
 
-C_DEFS = 
+C_DEFS =
 
-ASFLAGS = $(CPU) 
-CFLAGS = $(CPU) $(FLOAT-ABI) -std=c99  -Wall  $(C_DEFS)
+ASFLAGS = $(CPU) $(FLOAT-ABI)
+CFLAGS = $(CPU) $(FLOAT-ABI) $(OPT) -std=c99  -Wall  $(C_DEFS)
+CFLAGS += -ffunction-sections -fdata-sections
 
 #######################################
 # LDFLAGS
@@ -39,15 +40,17 @@ CFLAGS = $(CPU) $(FLOAT-ABI) -std=c99  -Wall  $(C_DEFS)
 LDSCRIPT = main.lds
 
 # libraries
-LIBS = 
-LIBDIR = 
-LDFLAGS = -T $(LDSCRIPT) $(LIBDIR) $(LIBS) -Map $(TARGET).map
+LIBS = -lc -lm -lnosys
+LIBDIR =
+LDFLAGS = -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(TARGET).map,--cref
+LDFLAGS += -Wl,--gc-sections
 
 
 all:
 	$(CC) -c $(CFLAGS) -g main.c -o main.o
-	$(AS)    $(ASFLAGS) -g startup.s -o startup.o
-	$(LD)  $(LDFLAGS)  main.o  startup.o  -o $(TARGET).elf
+	$(CC) -c $(CFLAGS) -g syscalls.c -o syscalls.o
+	$(AS)  $(ASFLAGS) -g startup.s -o startup.o
+	$(CC)  $(LDFLAGS)  main.o  syscalls.o  startup.o  -o $(TARGET).elf
 	$(SZ)  $(TARGET).elf
 	$(BIN)  $(TARGET).elf $(TARGET).bin
 
@@ -57,6 +60,6 @@ dump:
 
 
 clean:
-	rm -rf *.o
+	rm -rf *.o *.bin *.elf
 
 # *** EOF ***
