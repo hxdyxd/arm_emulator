@@ -1097,13 +1097,16 @@ int main()
     uint32_t counter = 0;
     uint32_t last_counter = 0;
     
-    load_program_memory("./Hello/Obj/hello.bin");
+    //load_program_memory("./Hello/Obj/hello.bin");
+    load_program_memory("./arm_hello_gcc/hello.bin");
     reset_proc();
     
     while(i) {
         fetch();
         decode();
         execute();
+        
+        //getchar();
         
         code_counter++;
         counter = (clock()*1000/CLOCKS_PER_SEC);
