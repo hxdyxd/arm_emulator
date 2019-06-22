@@ -4,6 +4,7 @@
 #include <soft_timer.h>
 #include <app_debug.h>
 
+
 char sbuf[MAX_UART_SBUF_SIZE];
 
 
@@ -38,10 +39,18 @@ void led_timer_proc(void)
     float doub;
     uint32_t code_counter =  CODE_COUNTER;
     CODE_COUNTER = 0;
-    PRINTF("rate = %d IPS \r\n", code_counter/1000 );
+    PRINTF("rate = %d KIPS \r\n", code_counter/1000 );
 
     doub = acos(0) * 100000;
     PRINTF("helloworld 123 %d \r\n", (int)doub );
+}
+
+void sin_test(void)
+{
+    for(float i=0; i<3.1415926/2; i+=0.1) {
+        PRINTF("sin(%d) =\r\n", (int)(i *100) );
+        //PRINTF("sin(%d) = %d \r\n", (int)(i *100), (int)(sin(i) * 100000) );
+    }
 }
 
 
@@ -54,6 +63,7 @@ int main(void)
     num /= 3;
 
     PRINTF("helloworld %d \r\n", num);
+    sin_test();
 
     while(1) {
         soft_timer_proc();

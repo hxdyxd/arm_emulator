@@ -55,8 +55,8 @@ CFLAGS += -ffunction-sections -fdata-sections
 LDSCRIPT = main.lds
 
 # libraries
-LIBS = -lnosys -lc -lm
-LIBDIR =
+LIBS = -lc -lnosys
+LIBDIR = -L/root/gcc-arm-none-eabi-8-2018-q4-major/arm-none-eabi/lib/
 LDFLAGS = --specs=nosys.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(TARGET).map,--cref
 LDFLAGS += -Wl,--gc-sections
 
@@ -66,7 +66,7 @@ AS_OBJS = $(patsubst %.s,%.o,$(ASM_SOURCES))
 
 
 all: $(OBJS) $(AS_OBJS)
-	$(CC)  $(LDFLAGS) $(AS_OBJS) $(OBJS) -o $(TARGET).elf
+	$(CC)  $(LDFLAGS) $(AS_OBJS) $(OBJS) -o $(TARGET).elf -lm
 	$(SZ)  $(TARGET).elf
 	$(BIN)  $(TARGET).elf $(TARGET).bin
 

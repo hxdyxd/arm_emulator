@@ -7,7 +7,7 @@
 #define RAM_SIZE    0x08000
 
 #define MEM_SIZE  0x20000
-#define DEBUG           0
+#define DEBUG           1
 
 
 #define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
@@ -109,7 +109,7 @@ uint8_t get_cpu_mode_code(void)
     return cpu_mode;
 }
 
-uint32_t register_read(uint8_t id)
+static inline uint32_t register_read(uint8_t id)
 {
     //Register file
     if(id < 8) {
@@ -126,7 +126,7 @@ uint32_t register_read(uint8_t id)
     }
 }
 
-void register_write(uint8_t id, uint32_t val)
+static inline void register_write(uint8_t id, uint32_t val)
 {
     //Register file
     if(id < 8 || id == 15) {
@@ -142,14 +142,14 @@ void register_write(uint8_t id, uint32_t val)
 }
 
 
-void exception_out(void)
+static inline void exception_out(void)
 {
     printf("PC = 0x%x \r\n", register_read(15));
     getchar();
 }
 
 
-int read_word(char *mem, unsigned int address)
+static int read_word(char *mem, unsigned int address)
 {
     int *data;
     if(address >= MEM_SIZE) {
@@ -171,7 +171,7 @@ int read_word(char *mem, unsigned int address)
 }
 
 
-void write_word(char *mem, unsigned int address, unsigned int data)
+static void write_word(char *mem, unsigned int address, unsigned int data)
 {
     int *data_p;
     if(address >= MEM_SIZE || (address&3) != 0) {
@@ -189,10 +189,10 @@ void write_word(char *mem, unsigned int address, unsigned int data)
 }
 
 
-void write_halfword(char *mem, unsigned int address, unsigned int data)
+static void write_halfword(char *mem, unsigned int address, unsigned int data)
 {
     short *data_p;
-    if(address >= MEM_SIZE || (address&1) != 0) {
+    if(address >= MEM_SIZE || (address&1) != 0 || address < CODE_SIZE) {
         printf("mem error, write halfword 0x%0x\r\n", address);
         exception_out();
     }
@@ -201,10 +201,10 @@ void write_halfword(char *mem, unsigned int address, unsigned int data)
 }
 
 
-void write_byte(char *mem, unsigned int address, unsigned char data)
+static void write_byte(char *mem, unsigned int address, unsigned char data)
 {
     char *data_p;
-    if(address >= MEM_SIZE) {
+    if(address >= MEM_SIZE || address < CODE_SIZE) {
         printf("mem error, write byte 0x%0x\r\n", address);
         exception_out();
     }
@@ -310,7 +310,7 @@ void decode(void)
     shift = (instruction_word&0x60) >> 5;  /* bit[6:5] */
     Bit4 = (instruction_word&0x10) >> 4;  /* bit[4] */
     Rm = (instruction_word&0xF);  /* bit[3:0] */
-    
+    code_type = code_is_unknow;
     
     switch(f) {
     case 0:
@@ -1116,23 +1116,27 @@ void reset_proc(void)
 
 int main()
 {
-    int i = 0x4000000;
-    
-    uint32_t counter = 0;
-    uint32_t last_counter = 0;
-    
-    //load_program_memory("./Hello/Obj/hello.bin");
-    load_program_memory("./arm_hello_gcc/hello.bin");
+    load_program_memory("./Hello/Obj/hello.bin");
+    //load_program_memory("./arm_hello_gcc/hello.bin");
     reset_proc();
     
-    while(i) {
+    while(1) {
         fetch();
         decode();
         execute();
         
-//        if(getchar() == 'c') {
-//            printf("cpsr = 0x%x\n", cpsr);
-//        }
+#if DEBUG
+        if(getchar() == 'c') {
+            printf("cpsr = 0x%x\n", cpsr);
+            for(int i=0; i<16; i++) {
+                if(i % 4 == 0) {
+                    printf("\n");
+                }
+                printf("R%d = 0x%08x, \t", i, register_read(i));
+            }
+            printf("\n");
+        }
+#endif
        
         code_counter++;
     }
