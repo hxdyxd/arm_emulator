@@ -3,11 +3,14 @@
 #include <time.h>
 #include <math.h>
 
-#define CODE_SIZE   0x4000
+#define CODE_SIZE   0x10000
+#define RAM_SIZE    0x08000
 
-#define MEM_SIZE  0x10000
+#define MEM_SIZE  0x20000
+#define DEBUG           0
 
-#define PRINTF(...)  do{ if(0){printf(__VA_ARGS__);} }while(0)
+
+#define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
 
 #define  IS_SET(v, bit) ( ((v)>>(bit))&1 )
 
@@ -153,7 +156,7 @@ int read_word(char *mem, unsigned int address)
         exception_out();
     }
     
-    if(address == 0x8020) {
+    if(address == 0x18020) {
         uint32_t clk1ms = (clock()*1000/CLOCKS_PER_SEC);
         return clk1ms;
     }
@@ -162,14 +165,26 @@ int read_word(char *mem, unsigned int address)
     return *data;
 }
 
+
 void write_word(char *mem, unsigned int address, unsigned int data)
 {
     int *data_p;
-    if(address >= MEM_SIZE) {
-        printf("mem overflow error, write 0x%0x\r\n", address);
+    if(address >= MEM_SIZE || address&3 != 0) {
+        printf("mem error, write word 0x%0x\r\n", address);
         exception_out();
     }
-    data_p = (int*) (mem + address);
+    data_p = (int *) (mem + address);
+    *data_p = data;
+}
+
+void write_halfword(char *mem, unsigned int address, unsigned int data)
+{
+    short *data_p;
+    if(address >= MEM_SIZE || address&1 != 0) {
+        printf("mem error, write halfword 0x%0x\r\n", address);
+        exception_out();
+    }
+    data_p = (short *) (mem + address);
     *data_p = data;
 }
 
@@ -177,10 +192,10 @@ void write_byte(char *mem, unsigned int address, unsigned char data)
 {
     char *data_p;
     if(address >= MEM_SIZE) {
-        printf("mem overflow error, write byte 0x%0x\r\n", address);
+        printf("mem error, write byte 0x%0x\r\n", address);
         exception_out();
     }
-    if(address == 0x8004) putchar(data);
+    if(address == 0x18004) putchar(data);
     data_p = (char *) (mem + address);
     *data_p = data;
 }
@@ -210,14 +225,15 @@ void load_program_memory(char *file_name)
 
 void fetch(void)
 {
-    if(register_read(15) - 4 >= CODE_SIZE) {
-        PRINTF("[FETCH] error, code overflow \r\n");
+    uint32_t pc = register_read(15) - 4;
+    if(pc >= CODE_SIZE || (pc&0x3 != 0)) {
+        PRINTF("[FETCH] error, pc[0x%x] overflow \r\n", pc);
         exception_out();
     }
     
     instruction_word = read_word(MEM, register_read(15) - 4);
     PRINTF("[0x%04x]: ", register_read(15) - 4 );
-    register_write(15, register_read(15) );
+    register_write(15, pc + 4 );
 }
 
 #define  code_is_swi      1
@@ -667,7 +683,7 @@ void execute(void)
         
         register_write(Rn, multl_long >> 32);
         register_write(Rd, multl_long&0xffffffff);
-        PRINTF("%lld = %d * %d \r\n", multl_long, operand2, rot_num);
+        PRINTF("%lld = %d * %d \r\n", (long long int)multl_long, operand2, rot_num);
         
         if(Bit20) {
             //Update CPSR register
@@ -855,26 +871,24 @@ void execute(void)
                 uint32_t data = read_word(MEM, address) & 0xffff;
                 if(data&0x8000) {
                     data |= 0xffff0000;
-                } else {
-                    data &= 0x0000ffff;
                 }
                 register_write(Rd, data);
-                
             } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
                 //Byte Signed
                 uint32_t data = read_word(MEM, address) & 0xff;
                 if(data&0x80) {
                     data |= 0xffffff00;
-                } else {
-                    data &= 0x000000ff;
                 }
                 register_write(Rd, data);
-                
             } else if(Bf) {
                 //Byte
                 register_write(Rd, read_word(MEM, address) & 0xff);
             } else {
                 //Word
+                if((address&0x3) != 0) {
+                    printf("ldr unsupported address = 0x%x\n", address);
+                    getchar();
+                }
                 register_write(Rd, read_word(MEM, address));
             }
             PRINTF("load data [0x%x]:0x%x to R%d \r\n", address, register_read(Rd), Rd);
@@ -882,12 +896,12 @@ void execute(void)
             //STR
             if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
                 //Halfword
-                write_byte(MEM, address, register_read(Rd) & 0xffff);
+                write_halfword(MEM, address, register_read(Rd) & 0xffff);
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  register_read(Rd) & 0xffff, address);
             } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
                 //Halfword Signed
                 uint16_t data = register_read(Rd) & 0xffff;
-                write_byte(MEM, address, data);
+                write_halfword(MEM, address, data);
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  data, address);
             } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
                 //Byte Signed
@@ -1026,17 +1040,22 @@ void execute(void)
         }
     } else if(code_type == code_is_msr1 || code_type == code_is_msr0) {
         if(!Bit22) {
-            if(IS_SET(Rn, 0) )
+            if(IS_SET(Rn, 0) ) {
+                cpsr &= 0xffffff00;
                 cpsr |= aluout&0xff;
-            if(IS_SET(Rn, 1) )
+            } else if(IS_SET(Rn, 1) ) {
+                cpsr &= 0xffff00ff;
                 cpsr |= aluout&0xff00;
-            if(IS_SET(Rn, 2) )
+            } else if(IS_SET(Rn, 2) ) {
+                cpsr &= 0xff00ffff;
                 cpsr |= aluout&0xff0000;
-            if(IS_SET(Rn, 3) )
+            } else if(IS_SET(Rn, 3) ) {
+                cpsr &= 0x00ffffff;
                 cpsr |= aluout&0xff000000;
+            }
             PRINTF("write register cpsr = 0x%x\r\n", cpsr);
         } else {
-            PRINTF("spsr not support todo...\r\n");
+            printf("spsr not support todo...\r\n");
         }
     } else if(code_type == code_is_mult) {
         register_write(Rn, aluout);   //Rd and Rn swap, !!!
@@ -1077,29 +1096,9 @@ void reset_proc(void)
     for(i=0; i<16; i++) {
         register_write(i, 0);
     }
-    for(i = CODE_SIZE; i < CODE_SIZE + 0x4000; i++) {
+    for(i = CODE_SIZE; i < CODE_SIZE + RAM_SIZE; i++) {
         MEM[i] = 0;
     }
-}
-
-
-
-float nResult(float x, float n)
-{
-    //(n^2n+1)/(2n+1)!也就是n/1*n/2*n/3*n/4*.....n/(2n+1)
-    return (n==1)?x:(nResult(x,n-1)*x/n);
-}
-
-double ssin(double x)
-{
-    //sin(x)=x-x^3/3!+x^5/5!-x^7/7!+……+(-1)(n^2n+1)/(2n+1)!+……
-    int i=0;
-    double result=0, n=0;
-    while( fabs( n=nResult(x,2*++i-1) ) > 0e-5 ) {//绝对值大于10^-5次方就循环
-        result+=(i%2==1)?n:-n;
-        //printf("%d %f \r\n", i, n);
-    }
-    return result;
 }
 
 int main()
@@ -1118,8 +1117,10 @@ int main()
         decode();
         execute();
         
-        //getchar();
-        
+//        if(getchar() == 'c') {
+//            printf("cpsr = 0x%x\n", cpsr);
+//        }
+       
         code_counter++;
         counter = (clock()*1000/CLOCKS_PER_SEC);
         if(counter - last_counter >= 2000) {
@@ -1129,19 +1130,7 @@ int main()
         }
     }
     
-/*    printf("\r\n---------------test code -----------\r\n");
-    
-    float pi = 3.14159;
-    float sin45f;
-    for(int i=0; i<=360; i += 4) {
-        sin45f = ssin(i * pi/180);
-        printf("ssin(%d) =%.4f \r\n", i, sin45f);
-    }
-    
-    float lld = sqrt(3.1415*2);
-    printf(" %f rr\r\n", lld );
-*/
-    
+    printf("\r\n---------------test code -----------\r\n");
     
     return 0;
 }

@@ -27,10 +27,25 @@ BIN = $(OBJCOPY) -O binary -S
 CPU = -mcpu=arm926ej-s
 FLOAT-ABI = -mfloat-abi=soft
 
+
+C_SRCS = \
+src/main.c \
+src/mini-printf.c \
+src/soft_timer.c
+
+
+ASM_SOURCES = \
+startup.s
+
+# C includes
+C_INCLUDES =  \
+-Isrc
+
+
 C_DEFS =
 
 ASFLAGS = $(CPU) $(FLOAT-ABI)
-CFLAGS = $(CPU) $(FLOAT-ABI) $(OPT) -std=c99  -Wall  $(C_DEFS)
+CFLAGS = $(CPU) $(FLOAT-ABI) $(OPT) -std=c99  -Wall  $(C_DEFS) $(C_INCLUDES)
 CFLAGS += -ffunction-sections -fdata-sections
 
 #######################################
@@ -40,26 +55,36 @@ CFLAGS += -ffunction-sections -fdata-sections
 LDSCRIPT = main.lds
 
 # libraries
-LIBS = -lc -lm -lnosys
+LIBS = -lnosys -lc -lm
 LIBDIR =
-LDFLAGS = -specs=nano.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(TARGET).map,--cref
+LDFLAGS = --specs=nosys.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(TARGET).map,--cref
 LDFLAGS += -Wl,--gc-sections
 
 
-all:
-	$(CC) -c $(CFLAGS) -g main.c -o main.o
-	$(CC) -c $(CFLAGS) -g syscalls.c -o syscalls.o
-	$(AS)  $(ASFLAGS) -g startup.s -o startup.o
-	$(CC)  $(LDFLAGS)  main.o  syscalls.o  startup.o  -o $(TARGET).elf
+OBJS = $(patsubst %.c,%.o,$(C_SRCS))
+AS_OBJS = $(patsubst %.s,%.o,$(ASM_SOURCES))
+
+
+all: $(OBJS) $(AS_OBJS)
+	$(CC)  $(LDFLAGS) $(AS_OBJS) $(OBJS) -o $(TARGET).elf
 	$(SZ)  $(TARGET).elf
 	$(BIN)  $(TARGET).elf $(TARGET).bin
 
 
-dump:
-	$(OBJDUMP) -d $(TARGET).elf
+%.o:%.c
+	$(CC) -c $(CFLAGS)  $< -o $@
 
+%.o:%.s
+	$(AS)  $(ASFLAGS)  $< -o $@
+
+
+dump:
+	$(OBJDUMP) -d $(TARGET).elf -S > dump.map
+
+readelf:
+	readelf -S  $(TARGET).elf
 
 clean:
-	rm -rf *.o *.bin *.elf
+	rm -rf ./*.o ./src/*.o *.bin *.elf *.map
 
 # *** EOF ***
