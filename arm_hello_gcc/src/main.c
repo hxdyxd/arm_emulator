@@ -11,6 +11,8 @@ char sbuf[MAX_UART_SBUF_SIZE];
 #define SERIAL_OUT *(volatile unsigned char *) (0x18004)
 #define SERIAL_IN *(volatile unsigned char *) (0x18008)
 
+#define CODE_COUNTER *(volatile unsigned int *) (0x18030)
+
 
 /* implementation of putchar (also used by printf function to output data)    */
 int uart_sendchar(char ch)                 /* Write character to Serial Port    */
@@ -34,9 +36,12 @@ int _write( int file, char *ptr, int len)
 void led_timer_proc(void)
 {
     float doub;
-    doub = acos(0) * 100000;
+    uint32_t code_counter =  CODE_COUNTER;
+    CODE_COUNTER = 0;
+    PRINTF("rate = %d IPS \r\n", code_counter/1000 );
 
-    PRINTF("helloworld 123 %d\n", (int)doub );
+    doub = acos(0) * 100000;
+    PRINTF("helloworld 123 %d \r\n", (int)doub );
 }
 
 
@@ -48,7 +53,7 @@ int main(void)
     uint32_t num = 12;
     num /= 3;
 
-    PRINTF("helloworld %d\n", num);
+    PRINTF("helloworld %d \r\n", num);
 
     while(1) {
         soft_timer_proc();

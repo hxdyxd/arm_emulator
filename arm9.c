@@ -63,6 +63,7 @@ const char *shift_table[4] = {
     "ROR", //11
 };
 
+uint32_t code_counter = 0;
 
 //register function
 unsigned int Register[7][16];
@@ -157,8 +158,12 @@ int read_word(char *mem, unsigned int address)
     }
     
     if(address == 0x18020) {
+        //sys clock ms
         uint32_t clk1ms = (clock()*1000/CLOCKS_PER_SEC);
         return clk1ms;
+    } else if(address == 0x18030) {
+        //ips
+        return code_counter;
     }
     
     data =  (int*) (mem + address);
@@ -169,24 +174,32 @@ int read_word(char *mem, unsigned int address)
 void write_word(char *mem, unsigned int address, unsigned int data)
 {
     int *data_p;
-    if(address >= MEM_SIZE || address&3 != 0) {
+    if(address >= MEM_SIZE || (address&3) != 0) {
         printf("mem error, write word 0x%0x\r\n", address);
         exception_out();
     }
+    if(address == 0x18030) {
+        //ips
+        code_counter = data;
+        return;
+    }
+    
     data_p = (int *) (mem + address);
     *data_p = data;
 }
 
+
 void write_halfword(char *mem, unsigned int address, unsigned int data)
 {
     short *data_p;
-    if(address >= MEM_SIZE || address&1 != 0) {
+    if(address >= MEM_SIZE || (address&1) != 0) {
         printf("mem error, write halfword 0x%0x\r\n", address);
         exception_out();
     }
     data_p = (short *) (mem + address);
     *data_p = data;
 }
+
 
 void write_byte(char *mem, unsigned int address, unsigned char data)
 {
@@ -226,7 +239,7 @@ void load_program_memory(char *file_name)
 void fetch(void)
 {
     uint32_t pc = register_read(15) - 4;
-    if(pc >= CODE_SIZE || (pc&0x3 != 0)) {
+    if(pc >= CODE_SIZE || ((pc&3) != 0)) {
         PRINTF("[FETCH] error, pc[0x%x] overflow \r\n", pc);
         exception_out();
     }
@@ -1104,7 +1117,7 @@ void reset_proc(void)
 int main()
 {
     int i = 0x4000000;
-    uint32_t code_counter = 0;
+    
     uint32_t counter = 0;
     uint32_t last_counter = 0;
     
@@ -1122,12 +1135,6 @@ int main()
 //        }
        
         code_counter++;
-        counter = (clock()*1000/CLOCKS_PER_SEC);
-        if(counter - last_counter >= 2000) {
-            printf("rate = %.1f \r\n", code_counter/2000.0 );
-            last_counter = counter;
-            code_counter = 0;
-        }
     }
     
     printf("\r\n---------------test code -----------\r\n");
