@@ -7,7 +7,7 @@
 #define RAM_SIZE    0x08000
 
 #define MEM_SIZE  0x20000
-#define DEBUG           1
+#define DEBUG           0
 
 
 #define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
@@ -64,6 +64,7 @@ const char *shift_table[4] = {
 };
 
 uint32_t code_counter = 0;
+//uint8_t abort_test = 0;
 
 //register function
 unsigned int Register[7][16];
@@ -144,7 +145,15 @@ static inline void register_write(uint8_t id, uint32_t val)
 
 static inline void exception_out(void)
 {
-    printf("PC = 0x%x \r\n", register_read(15));
+    printf("PC = 0x%x , code = %d\r\n", register_read(15), code_counter);
+    printf("cpsr = 0x%x\n", cpsr);
+    for(int i=0; i<16; i++) {
+        if(i % 4 == 0) {
+            printf("\n");
+        }
+        printf("R%d = 0x%08x, \t", i, register_read(i));
+    }
+    printf("\n");
     getchar();
 }
 
@@ -992,34 +1001,31 @@ void execute(void)
         register_write(15, aluout & 0xfffffffc);  //PC register
         PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
     } else if(code_type == code_is_ldm) {
+        if(Bit22) {
+            printf("[LDM] ldm bit22 set, error\r\n");
+            getchar();
+        }
+        
         if(Lf) { //bit [20]
             //LDM
             uint32_t address = operand1;
-            for(int i=0; i<15; i++) {
-                if(IS_SET(instruction_word, i)) {
+            for(int i=0; i<16; i++) {
+                int n = (Uf)?i:(15-i);
+                if(IS_SET(instruction_word, n)) {
                     if(Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
                     }
-                    register_write(i, read_word(MEM, address));
-                    PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, read_word(MEM, address), i);
+                    uint32_t data = read_word(MEM, address);
+                    if(i == 15) {
+                        data &= 0xfffffffc;
+                    }
+                    register_write(n, data);
+                    PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, read_word(MEM, address), n);
                     if(!Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
                     }
-                }
-            }
-            
-            if(IS_SET(instruction_word, 15)) {
-                if(Pf) {
-                    if(Uf) address += 4;
-                    else address -= 4;
-                }
-                register_write(15, read_word(MEM, address) & 0xfffffffe);
-                PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, read_word(MEM, address), 15);
-                if(!Pf) {
-                    if(Uf) address += 4;
-                    else address -= 4;
                 }
             }
             
@@ -1031,14 +1037,15 @@ void execute(void)
         } else {
             //STM
             uint32_t address = operand1;
-            for(int i=15; i>=0; i--) {
-                if(IS_SET(instruction_word, i)) {
+            for(int i=0; i<16; i++) {
+                int n = (Uf)?i:(15-i);
+                if(IS_SET(instruction_word, n)) {
                     if(Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
                     }
-                    write_word(MEM, address, register_read(i));
-                    PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", i, register_read(i), address);
+                    write_word(MEM, address, register_read(n));
+                    PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", n, register_read(n), address);
                     if(!Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
@@ -1072,7 +1079,7 @@ void execute(void)
         }
     } else if(code_type == code_is_mult) {
         register_write(Rn, aluout);   //Rd and Rn swap, !!!
-        PRINTF("write register R%d = 0x%x\r\n", Rn, aluout);
+        PRINTF("[MULT] write register R%d = 0x%x\r\n", Rn, aluout);
         
         if(Bit20) {
             //Update CPSR register
@@ -1127,14 +1134,13 @@ int main()
         
 #if DEBUG
         if(getchar() == 'c') {
-            printf("cpsr = 0x%x\n", cpsr);
-            for(int i=0; i<16; i++) {
-                if(i % 4 == 0) {
-                    printf("\n");
-                }
-                printf("R%d = 0x%08x, \t", i, register_read(i));
-            }
-            printf("\n");
+            exception_out();
+        }
+#endif
+#if 0
+        if(abort_test) {
+            exception_out();
+            abort_test = 0;
         }
 #endif
        
