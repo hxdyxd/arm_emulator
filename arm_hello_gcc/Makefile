@@ -5,7 +5,7 @@
 TARGET = hello
 
 # optimization
-OPT = -O0
+OPT = -O3
 
 #######################################
 # paths
