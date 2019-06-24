@@ -51,7 +51,9 @@ void led_timer_proc(void)
 
 void int32_test(void)
 {
-    int num = 24;
+    int num = -24;
+    num = num + 3;
+    printf("num (0x%p) = %d \r\n", &num , num);
     num = num + 3;
     printf("num (0x%p) = %d \r\n", &num , num);
     num = num - 3;
@@ -62,9 +64,10 @@ void int32_test(void)
     printf("num (0x%p) = %d \r\n", &num , num);
 }
 
+
 void float_test(void)
 {
-    double sum = 3.1;
+    float sum = 3.1;
     sum += 0.2;
     printf("+sum = %f \r\n", sum);
     sum += 0.2;
@@ -78,6 +81,7 @@ void float_test(void)
     sum /= 0.2;
     printf("/sum = %f \r\n", sum);
 }
+
 
 void sin_test(void)
 {

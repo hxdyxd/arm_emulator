@@ -6,7 +6,7 @@
 //Memary size
 
 #define CODE_SIZE   0x10000
-#define RAM_SIZE    0x8000
+#define RAM_SIZE    0x4000
 
 #define MEM_SIZE  0x20000
 /****************************************************/
@@ -592,10 +592,11 @@ void execute(void)
     unsigned char add_flag = 1;
     /*
      * 0: turn off shifter
-     * 1: turn on shifter
-     * 2: if(shift == 3) use rrx
+     * 3: PD(is) On
+     * 4: DP(rs) On
+     * 5: DP(i) On
     */
-    unsigned char shifter_flag = 1;
+    unsigned char shifter_flag = 0;
     unsigned int carry = 0;
     
     switch(cond) {
@@ -664,31 +665,25 @@ void execute(void)
         //no need to use shift
         shifter_flag = 0;
     } else if(code_type == code_is_ldr1 || code_type == code_is_dp0) {
+        //immediate shift
         rot_num = shift_amount;
-        if(rot_num == 0 && shift == 3) {
-            //RRX
-            shifter_flag = 2;
-        }
+        shifter_flag = 3;  //PD(is) On
     } else if(code_type == code_is_msr1) {
         operand1 = 0;  //msr don't support
         operand2 = immediate;
         rot_num = rotate_imm<<1;
         shift = 3;
-        if(rot_num == 0) {
-            shifter_flag = 0;
-        }
+        shifter_flag = 5;  //DP(i) On
     } else if(code_type == code_is_dp2) {
+        //immediate
         operand2 = immediate;
         rot_num = rotate_imm<<1;
-        shift = 3;
-        if(rot_num == 0) {
-            shifter_flag = 0;
-        }
+        shift = 3;  //use ROR Only
+        shifter_flag = 5;  //DP(i) On
     } else if(code_type == code_is_dp1) {
-        //No need to use 
-        if(rot_num == 0) {
-            shifter_flag = 0;
-        }
+        //register shift
+        //No need to use
+        shifter_flag = 4;  //DP(rs) On
     } else if(code_type == code_is_bx) {
         operand1 = 0;
         rot_num = 0;
@@ -705,7 +700,7 @@ void execute(void)
         shifter_flag = 0;  //no need to use shift
     } else if(code_type == code_is_mult) {
         operand2 = operand2 * rot_num;
-        shifter_flag = 0;
+        shifter_flag = 0;  //no need to use shift
     } else if(code_type == code_is_multl) {
         uint64_t multl_long = 0;
         uint8_t negative = 0;
@@ -761,60 +756,116 @@ void execute(void)
         switch(shift) {
         case 0:
             //LSL
-            if((rot_num&0xff) == 0) {
-                shifter_carry_out = cpsr_c;
-            } else if((rot_num&0xff) < 32) {
-                shifter_carry_out = IS_SET(operand2, rot_num-1);
-                operand2 = operand2 << rot_num;
-            } else if((rot_num&0xff) == 32) {
-                shifter_carry_out = operand2&1;
-                operand2 = 0;
-            } else /* operand2 > 32 */ {
-                shifter_carry_out = 0;
-                operand2 = 0;
+            if(shifter_flag == 3) {
+                //PD(is) On
+                if(rot_num == 0) {
+                    shifter_carry_out = cpsr_c;
+                } else {
+                    shifter_carry_out = IS_SET(operand2, 32 - rot_num);
+                    operand2 = operand2 << rot_num;
+                }
+            } else if(shifter_flag == 4) {
+                //DP(rs) On
+                if((rot_num&0xff) == 0) {
+                    shifter_carry_out = cpsr_c;
+                } else if((rot_num&0xff) < 32) {
+                    shifter_carry_out = IS_SET(operand2, 32 - rot_num);
+                    operand2 = operand2 << rot_num;
+                } else if((rot_num&0xff) == 32) {
+                    shifter_carry_out = operand2&1;
+                    operand2 = 0;
+                } else /* operand2 > 32 */ {
+                    shifter_carry_out = 0;
+                    operand2 = 0;
+                }
             }
+            
             break;
         case 1:
             //LSR
-            if((rot_num&0xff) == 0) {
-                shifter_carry_out = cpsr_c;
-            } else if((rot_num&0xff) < 32) {
-                shifter_carry_out = IS_SET(operand2, rot_num-1);
-                operand2 = operand2 >> rot_num;
-            } else if((rot_num&0xff) == 32) {
-                shifter_carry_out = IS_SET(operand2, 31);
-                operand2 = 0;
-            } else /* operand2 > 32 */ {
-                shifter_carry_out = 0;
-                operand2 = 0;
-            }
-            break;
-        case 2:
-            //ASR
-            if((rot_num&0xff) == 0) {
-                shifter_carry_out = cpsr_c;
-            } else if((rot_num&0xff) < 32) {
-                shifter_carry_out = IS_SET(operand2, rot_num-1);
-                operand2 = (int32_t)operand2 >> rot_num;
-            } else /* operand2 >= 32 */ {
-                if(!IS_SET(operand2, 31)) {
+            if(shifter_flag == 3) {
+                //PD(is) On
+                if(rot_num == 0) {
                     shifter_carry_out = IS_SET(operand2, 31);
                     operand2 = 0;
                 } else {
-                    shifter_carry_out = IS_SET(operand2, 31);
-                    operand2 = 0xffffffff;
+                    shifter_carry_out = IS_SET(operand2, rot_num-1);
+                    operand2 = operand2 >> rot_num;
                 }
+            } else if(shifter_flag == 4) {
+                //DP(rs) On
+                if((rot_num&0xff) == 0) {
+                    shifter_carry_out = cpsr_c;
+                } else if((rot_num&0xff) < 32) {
+                    shifter_carry_out = IS_SET(operand2, rot_num-1);
+                    operand2 = operand2 >> rot_num;
+                } else if((rot_num&0xff) == 32) {
+                    shifter_carry_out = IS_SET(operand2, 31);
+                    operand2 = 0;
+                } else /* operand2 > 32 */ {
+                    shifter_carry_out = 0;
+                    operand2 = 0;
+                }           
             }
+
+            break;
+        case 2:
+            //ASR
+            if(shifter_flag == 3) {
+                //PD(is) On
+                if(rot_num == 0) {
+                    shifter_carry_out = IS_SET(operand2, 31);
+                    if(!IS_SET(operand2, 31)) {
+                        operand2 = 0;
+                    } else {
+                        operand2 = 0xffffffff;
+                    }
+                } else {
+                    shifter_carry_out = IS_SET(operand2, rot_num-1);
+                    operand2 = (int32_t)operand2 >> rot_num;
+                }
+            } else if(shifter_flag == 4) {
+                //DP(rs) On
+                if((rot_num&0xff) == 0) {
+                    shifter_carry_out = cpsr_c;
+                } else if((rot_num&0xff) < 32) {
+                    shifter_carry_out = IS_SET(operand2, rot_num-1);
+                    operand2 = (int32_t)operand2 >> rot_num;
+                } else /* operand2 >= 32 */ {
+                    if(!IS_SET(operand2, 31)) {
+                        shifter_carry_out = IS_SET(operand2, 31);
+                        operand2 = 0;
+                    } else {
+                        shifter_carry_out = IS_SET(operand2, 31);
+                        operand2 = 0xffffffff;
+                    }
+                }     
+            }
+            
             break;
         case 3:
             //ROR, RRX
-            //ROR
-            if(shifter_flag == 2) {
-                //RRX, 5.1.13 Rotate right with extend
-                shifter_carry_out = operand2&1;
-                operand2 = (cpsr_c << 31) | (operand2 >> 1);
-            } else {
-                //ROR
+            if(shifter_flag == 5) {
+                //DP(i)
+                operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
+                if(rot_num == 0) {
+                     shifter_carry_out = cpsr_c;
+                } else {
+                    shifter_carry_out = IS_SET(operand2, 31);
+                }   
+            } else if(shifter_flag == 3) {
+                //PD(is) ROR On
+                if(rot_num == 0) {
+                    //RRX
+                    shifter_carry_out = operand2&1;
+                    operand2 = (cpsr_c << 31) | (operand2 >> 1);
+                } else {
+                    //ROR
+                    shifter_carry_out = IS_SET(operand2, rot_num-1);
+                    operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
+                }
+            } else if(shifter_flag == 4) {
+                //DP(rs) ROR On
                 if((rot_num&0xff) == 0) {
                     shifter_carry_out = cpsr_c;
                 } else if((rot_num&0x1f) == 0) {
@@ -824,6 +875,7 @@ void execute(void)
                     operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
                 }
             }
+            
             break;
         }
     }
