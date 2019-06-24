@@ -950,15 +950,19 @@ void execute(void)
                 write_halfword(MEM, address, register_read(Rd) & 0xffff);
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  register_read(Rd) & 0xffff, address);
             } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
-                //Halfword Signed
+                //Halfword Signed ?
                 uint16_t data = register_read(Rd) & 0xffff;
                 write_halfword(MEM, address, data);
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  data, address);
+                printf("STRSH ? \r\n");
+                exception_out();
             } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
-                //Byte Signed
+                //Byte Signed ?
                 uint8_t data = register_read(Rd) & 0xff;
                 write_byte(MEM, address, data);
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  data, address);
+                printf("STRSB ? \r\n");
+                exception_out();
             } else if(Bf) {
                 write_byte(MEM, address, register_read(Rd) & 0xff);
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  register_read(Rd) & 0xff, address);

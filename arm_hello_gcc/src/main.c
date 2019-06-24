@@ -47,19 +47,24 @@ void led_timer_proc(void)
     printf("exp(1) %f \r\n", exp(1));
 }
 
-void sin_test(void)
-{
-    float i = 0;
-    for(i=0; i<3.14159; i+=0.4) {
-        float sv = i;
-        printf("sin(%f) = %f\r\n", sv, sv);
-    }
-}
 
+
+void int32_test(void)
+{
+    int num = 24;
+    num = num + 3;
+    printf("num (0x%p) = %d \r\n", &num , num);
+    num = num - 3;
+    printf("num (0x%p) = %d \r\n", &num , num);
+    num = num * 3;
+    printf("num (0x%p) = %d \r\n", &num , num);
+    num = num / 3;
+    printf("num (0x%p) = %d \r\n", &num , num);
+}
 
 void float_test(void)
 {
-    float sum = 3.1;
+    double sum = 3.1;
     sum += 0.2;
     printf("+sum = %f \r\n", sum);
     sum += 0.2;
@@ -74,9 +79,15 @@ void float_test(void)
     printf("/sum = %f \r\n", sum);
 }
 
+void sin_test(void)
+{
+    double i = 0;
+    for(i=0; i<3.14159; i+=0.2) {
+        printf("sin(%f) = %f\r\n", i, sin(i));
+    }
+}
 
 
-int num = 24;
 uint32_t bss_test_val = 0;
 
 int main(void)
@@ -84,20 +95,11 @@ int main(void)
     soft_timer_init();
     soft_timer_create(SOFT_TIMER_LED, 1, 1, led_timer_proc, 1000);
 
-    num = num + 3;
-    printf("num (0x%p) = %d \r\n", &num , num);
-    num = num - 3;
-    printf("num (0x%p) = %d \r\n", &num , num);
-    num = num * 3;
-    printf("num (0x%p) = %d \r\n", &num , num);
-    num = num / 3;
-    printf("num (0x%p) = %d \r\n", &num , num);
     printf("bss_test_val (0x%p) = 0x%x \r\n", &bss_test_val , bss_test_val);
 
+    int32_test();
     float_test();
-
-    printf("helloworld %d \r\n", num);
-    //sin_test();
+    sin_test();
 
     while(1) {
         soft_timer_proc();

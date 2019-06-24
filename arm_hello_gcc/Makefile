@@ -24,7 +24,7 @@ OBJDUMP = $(PREFIX)objdump
 SZ = $(PREFIX)size
 BIN = $(OBJCOPY) -O binary -S
 
-CPU = -mcpu=arm926ej-s
+CPU = -mcpu=arm920t
 FLOAT-ABI = -mfloat-abi=soft
 
 
