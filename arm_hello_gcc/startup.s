@@ -32,6 +32,7 @@ _fiq:
 Reset_Handler:
     msr CPSR_c, #0x10
     ldr sp, =stack_top
+    /* bl reset */
     bl main
     b .
 

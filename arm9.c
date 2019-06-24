@@ -1,14 +1,20 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
-#include <math.h>
+
+/****************************************************/
+//Memary size
 
 #define CODE_SIZE   0x10000
-#define RAM_SIZE    0x08000
+#define RAM_SIZE    0x8000
 
 #define MEM_SIZE  0x20000
-#define DEBUG           0
+/****************************************************/
 
+#define DEBUG                  0
+#define MEM_CODE_READONLY      0
+
+//uint8_t abort_test = 0;
 
 #define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
 
@@ -64,7 +70,6 @@ const char *shift_table[4] = {
 };
 
 uint32_t code_counter = 0;
-//uint8_t abort_test = 0;
 
 //register function
 unsigned int Register[7][16];
@@ -198,10 +203,14 @@ static void write_word(char *mem, unsigned int address, unsigned int data)
 }
 
 
-static void write_halfword(char *mem, unsigned int address, unsigned int data)
+static void write_halfword(char *mem, unsigned int address, unsigned short data)
 {
     short *data_p;
-    if(address >= MEM_SIZE || (address&1) != 0 || address < CODE_SIZE) {
+    if(address >= MEM_SIZE || (address&1) != 0 
+#if MEM_CODE_READONLY
+     || address < CODE_SIZE
+#endif
+    ) {
         printf("mem error, write halfword 0x%0x\r\n", address);
         exception_out();
     }
@@ -213,7 +222,11 @@ static void write_halfword(char *mem, unsigned int address, unsigned int data)
 static void write_byte(char *mem, unsigned int address, unsigned char data)
 {
     char *data_p;
-    if(address >= MEM_SIZE || address < CODE_SIZE) {
+    if(address >= MEM_SIZE
+#if MEM_CODE_READONLY
+     || address < CODE_SIZE
+#endif
+     ) {
         printf("mem error, write byte 0x%0x\r\n", address);
         exception_out();
     }
@@ -398,10 +411,6 @@ void decode(void)
                         code_type = code_is_multl;
                         PRINTF("multl %sM%s [R%d L, R%d H] %s= R%d * R%d\r\n", Bit22?"S":"U",
                          IS_SET(instruction_word, 21)?"LAL":"ULL", Rd, Rn, IS_SET(instruction_word, 21)?"+":"", Rm, Rs);
-                        if(Bit22) {
-                            printf("unsupport SMULAL  PC = 0x%x \r\n", register_read(15));
-                            getchar();
-                        }
                     } else if(Bit24_23 == 2) {
                         code_type = code_is_swp;
                         PRINTF("swp \r\n");
@@ -698,14 +707,34 @@ void execute(void)
         operand2 = operand2 * rot_num;
         shifter_flag = 0;
     } else if(code_type == code_is_multl) {
-        uint64_t multl_long = (uint64_t)operand2 * rot_num;
+        uint64_t multl_long = 0;
+        uint8_t negative = 0;
+        if(Bit22) {
+            //Signed
+            if(IS_SET(operand2, 31)) {
+                operand2 = ~operand2 + 1;
+                negative++;
+            }
+            
+            if(IS_SET(rot_num, 31)) {
+                rot_num = ~rot_num + 1;
+                negative++;
+            }
+        }
+        
+        multl_long = (uint64_t)operand2 * rot_num;
+        if( negative == 1 ) {
+            //Set negative sign
+            multl_long = ~(multl_long - 1);
+        }
+        
         if(opcode&1) {
             multl_long += ( ((uint64_t)register_read(Rn) << 32) | register_read(Rd));
         }
         
         register_write(Rn, multl_long >> 32);
         register_write(Rd, multl_long&0xffffffff);
-        PRINTF("%lld = %d * %d \r\n", (long long int)multl_long, operand2, rot_num);
+        PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n", register_read(Rn), Rn, register_read(Rd), Rd, operand2, rot_num);
         
         if(Bit20) {
             //Update CPSR register
@@ -1123,8 +1152,8 @@ void reset_proc(void)
 
 int main()
 {
-    load_program_memory("./Hello/Obj/hello.bin");
-    //load_program_memory("./arm_hello_gcc/hello.bin");
+    //load_program_memory("./Hello/Obj/hello.bin");
+    load_program_memory("./arm_hello_gcc/hello.bin");
     reset_proc();
     
     while(1) {

@@ -6,7 +6,8 @@ _Min_Stack_Size = 0x1000; /* required amount of stack */
 /* Specify the memory areas */
 MEMORY
 {
-   RAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 0x18000
+   FLASH (RX)     : ORIGIN = 0x00000000, LENGTH = 0x10000
+   RAM (RWX)      : ORIGIN = 0x00010000, LENGTH = 0x8000
 }
 
 
@@ -21,7 +22,7 @@ SECTIONS
       KEEP (*(.init))
       KEEP (*(.fini))
       _end_text = .;
-   } > RAM
+   } >FLASH
 
    .data :
    {
@@ -29,7 +30,7 @@ SECTIONS
       *(.data*)
       . = ALIGN(4);
       _end_data = .;
-   } > RAM
+   } >FLASH
 
    .bss :
    {
@@ -38,7 +39,7 @@ SECTIONS
       *(COMMON)
       . = ALIGN(4);
       _end_bss = .;
-   } > RAM
+   } >FLASH
 
    .heap :
    {
@@ -47,7 +48,7 @@ SECTIONS
        _end = .;
        . = . + _Min_Heap_Size;
        . = ALIGN(8);
-   } > RAM
+   } >FLASH
 
    . = ALIGN(8);
    . = . + _Min_Stack_Size; /* 4kB of stack memory */
