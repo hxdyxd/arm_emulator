@@ -1,3 +1,5 @@
+/* 2019 06 26 */
+/* By hxdyxd */
 #include <stdio.h>
 #include <stdint.h>
 #include <time.h>
@@ -244,17 +246,16 @@ void load_program_memory(char *file_name)
     unsigned int address, instruction;
     fp = fopen(file_name, "rb");
     if(fp == NULL) {
-        PRINTF("Error opening input mem file\n");
+        printf("Error opening input mem file\n");
         exception_out();
     }
     address = 0;
-    PRINTF("load mem addr = %d \r\n", address);
     while(!feof(fp)) {
         fread(&instruction, 4, 1, fp);
         write_word(MEM, address, instruction);
         address = address + 4;
     }
-    printf("load mem addr = 0x%x \r\n", address);
+    printf("load mem size = 0x%x \r\n", address);
     fclose(fp);
 }
 

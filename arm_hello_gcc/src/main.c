@@ -1,12 +1,10 @@
+/* 2019 06 26 */
+/* By hxdyxd */
 #include <stdint.h>
-#include <math.h>
-#include <mini-printf.h>
-#include <soft_timer.h>
-#include <app_debug.h>
 #include <stdio.h>
+#include <math.h>
+#include <function_task.h>
 
-
-char sbuf[MAX_UART_SBUF_SIZE];
 
 
 #define SERIAL_FLAG *(volatile unsigned char *) (0x18000)
@@ -33,22 +31,19 @@ int _write( int file, char *ptr, int len)
     return len;
 }
 
-#define SOFT_TIMER_LED   (0)
 
 void led_timer_proc(void)
 {
-    float doub;
     uint32_t code_counter =  CODE_COUNTER;
     CODE_COUNTER = 0;
     printf("--------------------------------[ARM9]--------------------------\r\n");
-    printf("rate = %.3f KIPS \r\n", code_counter/2000.0 );
+    printf("[%lld] rate = %.3f KIPS \r\n", (uint64_t)TIMER_TASK_GET_TICK_COUNT(), code_counter/2000.0);
 
  
     printf("acos(0) %f \r\n", acos(0));
     printf("exp(1) %f \r\n", exp(1));
     printf("log(10) %f \r\n", log(10));
 }
-
 
 
 void int32_test(void)
@@ -100,19 +95,20 @@ void pi_test(void)
         f[b++]=a/5; 
     for(;d=0,g=c*2; c-=14,printf("%.4d",e + d/a),e=d%a) 
         for(b=c; d+=f[b]*a,f[b]=d%--g,d/=g--,--b; d*=b);
+    puts("\r\n");
 }
 
 
-
-uint32_t bss_test_val = 0;
+uint16_t bss_test_val[10] = {0,};
 
 
 int main(void)
 {
-    soft_timer_init();
-    soft_timer_create(SOFT_TIMER_LED, 1, 1, led_timer_proc, 2000);
+    printf("\r\n\r\n[ARM9] Build , %s %s \r\n", __DATE__, __TIME__);
 
-    printf("bss_test_val (%p) = 0x%x \r\n", &bss_test_val , bss_test_val);
+    for(int i=0; i<10; i++) {
+        printf("bss_test_val (%p) = 0x%x \r\n", &bss_test_val[i] , bss_test_val[i]);
+    }
 
     int32_test();
     float_test();
@@ -120,13 +116,14 @@ int main(void)
     pi_test();
 
     while(1) {
-        soft_timer_proc();
+        TIMER_TASK(timer1, 2000, 1) {
+            led_timer_proc();
+        }
     }
 }
 
 
 extern unsigned int _end_text;
-
 extern unsigned int _sidata;
 extern unsigned int _start_data;
 extern unsigned int _end_data;

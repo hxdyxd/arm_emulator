@@ -1,3 +1,5 @@
+# 2019 06 26
+# By hxdyxd
 
 ######################################
 # target
@@ -29,9 +31,7 @@ FLOAT-ABI = -mfloat-abi=soft
 
 
 C_SRCS = \
-src/main.c \
-src/mini-printf.c \
-src/soft_timer.c
+src/main.c
 
 
 ASM_SOURCES = \

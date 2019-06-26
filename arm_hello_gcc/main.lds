@@ -1,3 +1,6 @@
+/* 2019 06 26 */
+/* By hxdyxd */
+
 ENTRY(_Reset)
 
 _Min_Heap_Size = 0x1200;      /* required amount of heap  */
