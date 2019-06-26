@@ -37,9 +37,14 @@ void led_timer_proc(void)
     uint32_t code_counter =  CODE_COUNTER;
     CODE_COUNTER = 0;
     printf("--------------------------------[ARM9]--------------------------\r\n");
-    printf("[%lld] rate = %.3f KIPS \r\n", (uint64_t)TIMER_TASK_GET_TICK_COUNT(), code_counter/2000.0);
+    static uint32_t last_time = 0;
 
- 
+    printf("[%lld] rate = %.3f KIPS \r\n", 
+        (uint64_t)TIMER_TASK_GET_TICK_COUNT(),
+        code_counter*1.0/(TIMER_TASK_GET_TICK_COUNT() - last_time)
+    );
+    last_time = TIMER_TASK_GET_TICK_COUNT();
+
     printf("acos(0) %f \r\n", acos(0));
     printf("exp(1) %f \r\n", exp(1));
     printf("log(10) %f \r\n", log(10));
