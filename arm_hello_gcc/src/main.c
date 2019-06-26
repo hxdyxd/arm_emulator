@@ -106,12 +106,13 @@ void pi_test(void)
 
 uint32_t bss_test_val = 0;
 
+
 int main(void)
 {
     soft_timer_init();
     soft_timer_create(SOFT_TIMER_LED, 1, 1, led_timer_proc, 2000);
 
-    printf("bss_test_val (0x%p) = 0x%x \r\n", &bss_test_val , bss_test_val);
+    printf("bss_test_val (%p) = 0x%x \r\n", &bss_test_val , bss_test_val);
 
     int32_test();
     float_test();
@@ -124,33 +125,36 @@ int main(void)
 }
 
 
-// extern unsigned int _end_text;
-// extern unsigned int _start_data;
-// extern unsigned int _end_data;
-// extern unsigned int _start_bss;
-// extern unsigned int _end_bss;
+extern unsigned int _end_text;
 
-// void reset(void)
-// {
-//     unsigned int *src, *dst;
+extern unsigned int _sidata;
+extern unsigned int _start_data;
+extern unsigned int _end_data;
+extern unsigned int _start_bss;
+extern unsigned int _end_bss;
 
-//     src = &_end_text;
-//     dst = &_start_data;
-//     while (dst < &_end_data) {
-//         *dst++ = *src++;
-//     }
 
-//     dst = &_start_bss;
-//     while (dst < &_end_bss) {
-//         *dst++ = 1;
-//     }
+void reset(void)
+{
+    unsigned int *src, *dst;
 
-//     PRINTF("_end_text = 0x%x\r\n", _end_text);
-//     PRINTF("_start_data = 0x%x\r\n", _start_data);
-//     PRINTF("_end_data = 0x%x\r\n", _end_data);
-//     PRINTF("_start_bss = 0x%x\r\n", _start_bss);
-//     PRINTF("_end_bss = 0x%x\r\n", _end_bss);
-//     main();
-// }
+    src = &_sidata;
+    dst = &_start_data;
+    while (dst < &_end_data) {
+        *dst++ = *src++;
+    }
+
+    dst = &_start_bss;
+    while (dst < &_end_bss) {
+        *dst++ = 0;
+    }
+
+    printf("_end_text = %p\r\n", &_end_text);
+    printf("_sidata = %p\r\n", &_sidata);
+    printf("_start_data = %p\r\n", &_start_data);
+    printf("_end_data = %p\r\n", &_end_data);
+    printf("_start_bss = %p\r\n", &_start_bss);
+    printf("_end_bss = %p\r\n", &_end_bss);
+}
 
 /*****************************END OF FILE***************************/

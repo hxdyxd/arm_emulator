@@ -6,7 +6,7 @@
 //Memary size
 
 #define CODE_SIZE   0x10000
-#define RAM_SIZE    0x4000
+#define RAM_SIZE    0x8000
 
 #define MEM_SIZE  0x20000
 /****************************************************/
