@@ -32,11 +32,17 @@ unsigned int spsr[7] = {0, };
 #define  cpsr_c_set(v)  do{ if(v) {cpsr |= 1 << 29;} else {cpsr &= ~(1 << 29);} }while(0)
 #define  cpsr_v_set(v)  do{ if(v) {cpsr |= 1 << 28;} else {cpsr &= ~(1 << 28);} }while(0)
 
+#define  cpsr_i_set(v)  do{ if(v) {cpsr |= 1 << 7;} else {cpsr &= ~(1 << 7);} }while(0)
+#define  cpsr_f_set(v)  do{ if(v) {cpsr |= 1 << 6;} else {cpsr &= ~(1 << 6);} }while(0)
+#define  cpsr_t_set(v)  do{ if(v) {cpsr |= 1 << 5;} else {cpsr &= ~(1 << 5);} }while(0)
+
 #define  cpsr_n  IS_SET(cpsr, 31)
 #define  cpsr_z  IS_SET(cpsr, 30)
 #define  cpsr_c  IS_SET(cpsr, 29)
 #define  cpsr_v  IS_SET(cpsr, 28)
 #define  cpsr_q  IS_SET(cpsr, 27)
+#define  cpsr_i  IS_SET(cpsr, 7)
+#define  cpsr_f  IS_SET(cpsr, 6)
 #define  cpsr_t  IS_SET(cpsr, 5)
 #define  cpsr_m  (cpsr&0x1f)
 
@@ -259,17 +265,54 @@ void load_program_memory(char *file_name)
     fclose(fp);
 }
 
+
+void interrupt_exception(uint8_t type)
+{
+    uint32_t cpsr_int = cpsr;
+    uint32_t next_pc = register_read(15) - 4;  //lr 
+    printf("cpsr(0x%x) save to r14_s\r\n", cpsr_int);
+    switch(type) {
+    case CPSR_M_SVC:
+        //swi
+        printf("svc lr = 0x%x swi\r\n", next_pc);
+        register_write(15, 0x8);
+        cpsr_i_set(1);  //disable irq
+        cpsr_t_set(0);  //arm mode
+        cpsr &= 0x1f;
+        cpsr |= CPSR_M_SVC;
+        spsr[CPU_MODE_SVC] = cpsr_int;  //write SPSR_svc
+        register_write(14, next_pc);  //write R14_svc
+        break;
+    case CPSR_M_IRQ:
+        //irq
+        if(cpsr_i) {
+            return;  //irq disable
+        }
+        register_write(15, 0x18);
+        cpsr_i_set(1);  //disable irq
+        cpsr_t_set(0);  //arm mode
+        cpsr &= 0x1f;
+        cpsr |= CPSR_M_IRQ;
+        spsr[CPU_MODE_IRQ] = cpsr_int;  //write SPSR_irq
+        register_write(14, next_pc + 4);  //write R14_irq
+        break;
+    default:
+        exception_out();
+    }
+}
+
+
 void fetch(void)
 {
-    uint32_t pc = register_read(15) - 4;
+    uint32_t pc = register_read(15) - 4; //current pc
     if(pc >= CODE_SIZE || ((pc&3) != 0)) {
         PRINTF("[FETCH] error, pc[0x%x] overflow \r\n", pc);
         exception_out();
     }
     
     instruction_word = read_word(MEM, register_read(15) - 4);
-    PRINTF("[0x%04x]: ", register_read(15) - 4 );
-    register_write(15, pc + 4 );
+    PRINTF("[0x%04x]: ", register_read(15) - 4);
+    register_write(15, pc + 4 ); //current pc add 4
 }
 
 #define  code_is_swi      1
@@ -576,7 +619,7 @@ void decode(void)
     case 7:
         //software interrupt
         code_type = code_is_swi;
-        printf("swi \r\n");
+        PRINTF("swi \r\n");
         break;
     default:
         code_type = code_is_unknow;
@@ -742,6 +785,9 @@ void execute(void)
             PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
         }
         
+        return;
+    } else if(code_type == code_is_swi) {
+        interrupt_exception(CPSR_M_SVC);
         return;
     } else if(code_type == code_is_mrs) {
         shifter_flag = 0;  //no need to use shift
@@ -1070,8 +1116,9 @@ void execute(void)
             PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
             
             if(Rd == 15 && Bit24_23 != 2) {
-                cpsr = spsr[get_cpu_mode_code()];
-                printf("cpsr 0x%x copy from spsr %d \r\n", cpsr, get_cpu_mode_code());
+                uint8_t cpu_mode = get_cpu_mode_code();
+                cpsr = spsr[cpu_mode];
+                printf("cpsr 0x%x copy from spsr %d \r\n", cpsr, cpu_mode);
             }
         }
     } else if(code_type == code_is_bx || code_type == code_is_b) {
@@ -1198,7 +1245,9 @@ void execute(void)
 void reset_proc(void)
 {
     int i;
-    cpsr = 0xd3;
+    cpsr = CPSR_M_SVC;
+    cpsr_i_set(1);  //disable irq
+    cpsr_f_set(1);  //disable fiq
     for(i=0; i<16; i++) {
         register_write(i, 0);
     }
@@ -1207,8 +1256,11 @@ void reset_proc(void)
     }
 }
 
+
 int main()
 {
+    uint32_t last_counter = 0;
+    
     //load_program_memory("./Hello/Obj/hello.bin");
     load_program_memory("./arm_hello_gcc/hello.bin");
     reset_proc();
@@ -1217,6 +1269,13 @@ int main()
         fetch();
         decode();
         execute();
+        
+        uint32_t clk =  (clock()*1000/CLOCKS_PER_SEC);
+        if(clk - last_counter > 2000) {
+            last_counter = clk;
+            interrupt_exception(CPSR_M_IRQ);
+        }
+        
         
 #if DEBUG
         if(getchar() == 'c') {
