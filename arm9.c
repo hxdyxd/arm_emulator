@@ -1259,8 +1259,6 @@ void reset_proc(void)
 
 int main()
 {
-    uint32_t last_counter = 0;
-    
     //load_program_memory("./Hello/Obj/hello.bin");
     load_program_memory("./arm_hello_gcc/hello.bin");
     reset_proc();
@@ -1269,8 +1267,6 @@ int main()
         fetch();
         decode();
         execute();
-        
-        uint32_t clk =  (clock()*1000/CLOCKS_PER_SEC);
         
         //per millisecond timer irq test
         if(code_counter%15000 == 0) {
