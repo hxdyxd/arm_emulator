@@ -270,7 +270,7 @@ void interrupt_exception(uint8_t type)
 {
     uint32_t cpsr_int = cpsr;
     uint32_t next_pc = register_read(15) - 4;  //lr 
-    printf("cpsr(0x%x) save to r14_s\r\n", cpsr_int);
+    PRINTF("cpsr(0x%x) save to r14_s\r\n", cpsr_int);
     switch(type) {
     case CPSR_M_SVC:
         //swi
@@ -1118,7 +1118,7 @@ void execute(void)
             if(Rd == 15 && Bit24_23 != 2) {
                 uint8_t cpu_mode = get_cpu_mode_code();
                 cpsr = spsr[cpu_mode];
-                printf("cpsr 0x%x copy from spsr %d \r\n", cpsr, cpu_mode);
+                PRINTF("cpsr 0x%x copy from spsr %d \r\n", cpsr, cpu_mode);
             }
         }
     } else if(code_type == code_is_bx || code_type == code_is_b) {
@@ -1271,8 +1271,9 @@ int main()
         execute();
         
         uint32_t clk =  (clock()*1000/CLOCKS_PER_SEC);
-        if(clk - last_counter > 2000) {
-            last_counter = clk;
+        
+        //per millisecond timer irq test
+        if(code_counter%15000 == 0) {
             interrupt_exception(CPSR_M_IRQ);
         }
         
