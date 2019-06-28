@@ -13,10 +13,10 @@
 #define MEM_SIZE  0x20000
 /****************************************************/
 
-#define DEBUG                  0
+#define DEBUG                  abort_test
 #define MEM_CODE_READONLY      0
 
-//uint8_t abort_test = 0;
+uint8_t abort_test = 0;
 
 #define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
 
@@ -160,13 +160,19 @@ static inline void exception_out(void)
 {
     printf("PC = 0x%x , code = %d\r\n", register_read(15), code_counter);
     printf("cpsr = 0x%x\n", cpsr);
+    printf("User mode register:");
     for(int i=0; i<16; i++) {
         if(i % 4 == 0) {
             printf("\n");
         }
-        printf("R%d = 0x%08x, \t", i, register_read(i));
+        printf("R%2d = 0x%08x, ", i, Register[CPU_MODE_USER][i]);
     }
-    printf("\n");
+    printf("\r\nPrivileged mode register\r\n");
+    for(int i=1; i<7; i++) {
+        printf("R%2d = 0x%08x, ", 13, Register[i][13]);
+        printf("R%2d = 0x%08x, ", 14, Register[i][14]);
+        printf("%d \n", i);
+    }
     getchar();
 }
 
@@ -270,11 +276,10 @@ void interrupt_exception(uint8_t type)
 {
     uint32_t cpsr_int = cpsr;
     uint32_t next_pc = register_read(15) - 4;  //lr 
-    PRINTF("cpsr(0x%x) save to r14_s\r\n", cpsr_int);
+    PRINTF("cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri\r\n", cpsr_int, next_pc);
     switch(type) {
     case CPSR_M_SVC:
         //swi
-        printf("svc lr = 0x%x swi\r\n", next_pc);
         register_write(15, 0x8);
         cpsr_i_set(1);  //disable irq
         cpsr_t_set(0);  //arm mode
@@ -997,10 +1002,14 @@ void execute(void)
         }
     }
     
+    /**************************alu*************************/
+    
     uint32_t sum_middle = add_flag?((operand1&0x7fffffff) + (operand2&0x7fffffff) + carry):((operand1&0x7fffffff) - (operand2&0x7fffffff) - carry);
     uint32_t cy_high_bits =  add_flag?(IS_SET(operand1, 31) + IS_SET(operand2, 31) + IS_SET(sum_middle, 31)):(IS_SET(operand1, 31) - IS_SET(operand2, 31) - IS_SET(sum_middle, 31));
     uint32_t aluout = ((cy_high_bits&1) << 31) | (sum_middle&0x7fffffff);
-    PRINTF("op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", operand1, operand2, carry, aluout);
+    PRINTF("[ALU]op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", operand1, operand2, carry, aluout);
+    
+    /**************************alu end*********************/
 
     if(code_type == code_is_ldr0 || code_type == code_is_ldr1 ||
        code_type == code_is_ldrsb1 || code_type == code_is_ldrsh1 || code_type == code_is_ldrh1 ||
@@ -1113,12 +1122,12 @@ void execute(void)
                 //v unaffected
             }
             
-            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+            PRINTF("[DP] update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
             
             if(Rd == 15 && Bit24_23 != 2) {
                 uint8_t cpu_mode = get_cpu_mode_code();
                 cpsr = spsr[cpu_mode];
-                PRINTF("cpsr 0x%x copy from spsr %d \r\n", cpsr, cpu_mode);
+                PRINTF("[DP] cpsr 0x%x copy from spsr %d \r\n", cpsr, cpu_mode);
             }
         }
     } else if(code_type == code_is_bx || code_type == code_is_b) {
@@ -1134,13 +1143,15 @@ void execute(void)
         register_write(15, aluout & 0xfffffffc);  //PC register
         PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
     } else if(code_type == code_is_ldm) {
-        if(Bit22) {
-            printf("[LDM] ldm bit22 set, error\r\n");
-            getchar();
-        }
         
         if(Lf) { //bit [20]
             //LDM
+            if(Bit22 && !IS_SET(instruction_word, 15)) {
+                printf("[LDM] ldm2 unsupport\r\n");
+                getchar();
+            }
+            
+            uint8_t pc_include_flag = 0;
             uint32_t address = operand1;
             for(int i=0; i<16; i++) {
                 int n = (Uf)?i:(15-i);
@@ -1150,8 +1161,11 @@ void execute(void)
                         else address -= 4;
                     }
                     uint32_t data = read_word(MEM, address);
-                    if(i == 15) {
+                    if(n == 15) {
                         data &= 0xfffffffc;
+                        if(Bit22) {
+                            pc_include_flag = 1;
+                        }
                     }
                     register_write(n, data);
                     PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, read_word(MEM, address), n);
@@ -1167,7 +1181,19 @@ void execute(void)
                 PRINTF("[LDM] write R%d = 0x%0x \r\n", Rn, address);
             }
             
+            if(pc_include_flag) {
+                //LDM(3) copy spsr to cpsr
+                uint8_t cpu_mode = get_cpu_mode_code();
+                cpsr = spsr[cpu_mode];
+                PRINTF("ldm(3) cpsr 0x%x copy from spsr %d\r\n", cpsr, cpu_mode);
+            }
+            
         } else {
+            
+            if(Bit22) {
+                printf("[STM2] warn ldm bit22 set\r\n");
+                getchar();
+            }
             //STM
             uint32_t address = operand1;
             for(int i=0; i<16; i++) {
@@ -1293,4 +1319,5 @@ int main()
     
     return 0;
 }
+
 

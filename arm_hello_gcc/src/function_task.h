@@ -25,7 +25,7 @@
 
 
 
-#define TIMER_TASK_GET_TICK_COUNT()  (*((volatile uint32_t *)0x18020))
+#define TIMER_TASK_GET_TICK_COUNT()  (cnt_counter)
 
 #define  TIMER_TASK(name,time,condition)\
     static uint32_t name##timer = 0;\

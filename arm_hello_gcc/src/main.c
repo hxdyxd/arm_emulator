@@ -6,7 +6,7 @@
 #include <function_task.h>
 
 
-
+//uart
 #define SERIAL_FLAG *(volatile unsigned char *) (0x18000)
 #define SERIAL_OUT *(volatile unsigned char *) (0x18004)
 #define SERIAL_IN *(volatile unsigned char *) (0x18008)
@@ -32,18 +32,35 @@ int _write( int file, char *ptr, int len)
 }
 
 
+//systick
+volatile uint32_t cnt_counter = 0;
+
+void handle_irq(void)
+{
+    cnt_counter++;
+    //putchar('i');
+}
+
+void handle_swi(void)
+{
+    SERIAL_OUT = 's';
+}
+
+
 void led_timer_proc(void)
 {
+    static uint32_t last_code_counter = 0;
     uint32_t code_counter =  CODE_COUNTER;
-    CODE_COUNTER = 0;
+
     printf("--------------------------------[ARM9]--------------------------\r\n");
     static uint32_t last_time = 0;
 
     printf("[%lld] rate = %.3f KIPS \r\n", 
         (uint64_t)TIMER_TASK_GET_TICK_COUNT(),
-        code_counter*1.0/(TIMER_TASK_GET_TICK_COUNT() - last_time)
+        (code_counter - last_code_counter)*1.0/(TIMER_TASK_GET_TICK_COUNT() - last_time)
     );
     last_time = TIMER_TASK_GET_TICK_COUNT();
+    last_code_counter = code_counter;
 
     printf("acos(0) %f \r\n", acos(0));
     printf("exp(1) %f \r\n", exp(1));
@@ -104,7 +121,7 @@ void pi_test(void)
 }
 
 
-uint16_t bss_test_val[10] = {0,};
+uint16_t bss_test_val[10];
 
 
 int main(void)
@@ -126,6 +143,7 @@ int main(void)
         }
     }
 }
+
 
 
 extern unsigned int _end_text;
