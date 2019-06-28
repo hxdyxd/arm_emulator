@@ -1,0 +1,100 @@
+# 2019 06 26
+# By hxdyxd
+
+######################################
+# target
+######################################
+TARGET = hello
+
+# optimization
+OPT = -O3
+
+#######################################
+# paths
+#######################################
+# Build path
+BUILD_DIR = build
+
+PREFIX = arm-none-eabi-
+
+
+CC = $(PREFIX)gcc
+AS = $(PREFIX)as
+LD = $(PREFIX)ld
+OBJCOPY = $(PREFIX)objcopy
+OBJDUMP = $(PREFIX)objdump
+SZ = $(PREFIX)size
+BIN = $(OBJCOPY) -O binary -S
+
+CPU = -mcpu=arm920t
+FLOAT-ABI = -mfloat-abi=soft
+
+
+C_SRCS = \
+src/main.c \
+freertos/Source/croutine.c \
+freertos/Source/event_groups.c \
+freertos/Source/list.c \
+freertos/Source/queue.c \
+freertos/Source/tasks.c \
+freertos/Source/timers.c \
+freertos/Source/stream_buffer.c \
+freertos/Source/portable/MemMang/heap_4.c \
+freertos/Source/portable/GCC/port.c \
+freertos/Source/portable/GCC/portISR.c
+
+ASM_SOURCES = \
+startup.s
+
+# C includes
+C_INCLUDES =  \
+-Isrc \
+-Ifreertos/Source/include \
+-Ifreertos/Source/portable/GCC
+
+C_DEFS =
+
+ASFLAGS = $(CPU) $(FLOAT-ABI)
+CFLAGS = $(CPU) $(FLOAT-ABI) $(OPT) -std=c99  -Wall  $(C_DEFS) $(C_INCLUDES)
+CFLAGS += -ffunction-sections -fdata-sections
+
+#######################################
+# LDFLAGS
+#######################################
+# link script
+LDSCRIPT = main.lds
+
+# libraries
+LIBS = -lc -lnosys
+LIBDIR = -L/root/gcc-arm-none-eabi-8-2018-q4-major/arm-none-eabi/lib/
+LDFLAGS = --specs=nosys.specs -T$(LDSCRIPT) $(LIBDIR) $(LIBS) -Wl,-Map=$(TARGET).map,--cref
+LDFLAGS += -Wl,--gc-sections
+
+
+OBJS = $(patsubst %.c,%.o,$(C_SRCS))
+AS_OBJS = $(patsubst %.s,%.o,$(ASM_SOURCES))
+
+
+all: $(OBJS) $(AS_OBJS)
+	$(CC)  $(LDFLAGS) $(AS_OBJS) $(OBJS) -o $(TARGET).elf -lm
+	$(SZ)  $(TARGET).elf
+	$(BIN)  $(TARGET).elf $(TARGET).bin
+
+
+%.o:%.c
+	$(CC) -c $(CFLAGS)  $< -o $@
+
+%.o:%.s
+	$(AS)  $(ASFLAGS)  $< -o $@
+
+
+dump:
+	$(OBJDUMP) -d $(TARGET).elf -S > dump.map
+
+readelf:
+	readelf -S  $(TARGET).elf
+
+clean:
+	rm -rf ./*.o ./src/*.o *.bin *.elf *.map
+
+# *** EOF ***

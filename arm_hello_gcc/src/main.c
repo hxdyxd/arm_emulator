@@ -7,11 +7,11 @@
 
 
 //uart
-#define SERIAL_FLAG *(volatile unsigned char *) (0x18000)
-#define SERIAL_OUT *(volatile unsigned char *) (0x18004)
-#define SERIAL_IN *(volatile unsigned char *) (0x18008)
+#define SERIAL_FLAG *(volatile unsigned char *) (0x1f000)
+#define SERIAL_OUT *(volatile unsigned char *) (0x1f004)
+#define SERIAL_IN *(volatile unsigned char *) (0x1f008)
 
-#define CODE_COUNTER *(volatile unsigned int *) (0x18030)
+#define CODE_COUNTER *(volatile unsigned int *) (0x1f030)
 
 
 /* implementation of putchar (also used by printf function to output data)    */
@@ -41,9 +41,9 @@ void handle_irq(void)
     //putchar('i');
 }
 
-void handle_swi(void)
+void handle_swi(int number)
 {
-    SERIAL_OUT = 's';
+    printf("swi: 0x%x \r\n", number);
 }
 
 

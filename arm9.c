@@ -8,12 +8,12 @@
 //Memary size
 
 #define CODE_SIZE   0x10000
-#define RAM_SIZE    0x8000
+#define RAM_SIZE    0xf000
 
 #define MEM_SIZE  0x20000
 /****************************************************/
 
-#define DEBUG                  abort_test
+#define DEBUG                  0
 #define MEM_CODE_READONLY      0
 
 uint8_t abort_test = 0;
@@ -95,25 +95,25 @@ uint8_t get_cpu_mode_code(void)
     switch(cpsr_m) {
     case CPSR_M_USR:
     case CPSR_M_SYS:
-        cpu_mode = CPU_MODE_USER;
+        cpu_mode = CPU_MODE_USER; //0
         break;
     case CPSR_M_FIQ:
-        cpu_mode = CPU_MODE_FIQ;
+        cpu_mode = CPU_MODE_FIQ; //1
         break;
     case CPSR_M_IRQ:
-        cpu_mode = CPU_MODE_IRQ;
+        cpu_mode = CPU_MODE_IRQ; //2
         break;
     case CPSR_M_SVC:
-        cpu_mode = CPU_MODE_SVC;
+        cpu_mode = CPU_MODE_SVC;  //3
         break;
     case CPSR_M_MON:
-        cpu_mode = CPU_MODE_USER;
+        cpu_mode = CPU_MODE_Mon;  //6
         break;
     case CPSR_M_ABT:
-        cpu_mode = CPU_MODE_Abort;
+        cpu_mode = CPU_MODE_Abort;  //5
         break;
     case CPSR_M_UND:
-        cpu_mode = CPU_MODE_Mon;
+        cpu_mode = CPU_MODE_Undef;  //4
         break;
     default:
         cpu_mode = 0;
@@ -122,6 +122,17 @@ uint8_t get_cpu_mode_code(void)
     }
     return cpu_mode;
 }
+
+static inline uint32_t register_read_user_mode(uint8_t id)
+{
+    return Register[0][id];
+}
+
+static inline void register_write_user_mode(uint8_t id, uint32_t val)
+{
+    Register[0][id] = val;
+}
+
 
 static inline uint32_t register_read(uint8_t id)
 {
@@ -185,11 +196,11 @@ static int read_word(char *mem, unsigned int address)
         exception_out();
     }
     
-    if(address == 0x18020) {
+    if(address == 0x1f020) {
         //sys clock ms
         uint32_t clk1ms = (clock()*1000/CLOCKS_PER_SEC);
         return clk1ms;
-    } else if(address == 0x18030) {
+    } else if(address == 0x1f030) {
         //ips
         return code_counter;
     }
@@ -206,7 +217,7 @@ static void write_word(char *mem, unsigned int address, unsigned int data)
         printf("mem error, write word 0x%0x\r\n", address);
         exception_out();
     }
-    if(address == 0x18030) {
+    if(address == 0x1f030) {
         //ips
         code_counter = data;
         return;
@@ -244,7 +255,7 @@ static void write_byte(char *mem, unsigned int address, unsigned char data)
         printf("mem error, write byte 0x%0x\r\n", address);
         exception_out();
     }
-    if(address == 0x18004) putchar(data);
+    if(address == 0x1f004) putchar(data);
     data_p = (char *) (mem + address);
     *data_p = data;
 }
@@ -276,14 +287,14 @@ void interrupt_exception(uint8_t type)
 {
     uint32_t cpsr_int = cpsr;
     uint32_t next_pc = register_read(15) - 4;  //lr 
-    PRINTF("cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri\r\n", cpsr_int, next_pc);
+    PRINTF("[INT %d]cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri\r\n", type, cpsr_int, next_pc);
     switch(type) {
     case CPSR_M_SVC:
         //swi
         register_write(15, 0x8);
         cpsr_i_set(1);  //disable irq
         cpsr_t_set(0);  //arm mode
-        cpsr &= 0x1f;
+        cpsr &= ~0x1f;
         cpsr |= CPSR_M_SVC;
         spsr[CPU_MODE_SVC] = cpsr_int;  //write SPSR_svc
         register_write(14, next_pc);  //write R14_svc
@@ -296,7 +307,7 @@ void interrupt_exception(uint8_t type)
         register_write(15, 0x18);
         cpsr_i_set(1);  //disable irq
         cpsr_t_set(0);  //arm mode
-        cpsr &= 0x1f;
+        cpsr &= ~0x1f;
         cpsr |= CPSR_M_IRQ;
         spsr[CPU_MODE_IRQ] = cpsr_int;  //write SPSR_irq
         register_write(14, next_pc + 4);  //write R14_irq
@@ -723,6 +734,10 @@ void execute(void)
         rot_num = rotate_imm<<1;
         shift = 3;
         shifter_flag = 5;  //DP(i) On
+    } else if(code_type == code_is_msr0) {
+        operand1 = 0;  //msr don't support
+        //no need to use shift
+        shifter_flag = 0;
     } else if(code_type == code_is_dp2) {
         //immediate
         operand2 = immediate;
@@ -1146,9 +1161,10 @@ void execute(void)
         
         if(Lf) { //bit [20]
             //LDM
+            uint8_t ldm_type = 0;
             if(Bit22 && !IS_SET(instruction_word, 15)) {
-                printf("[LDM] ldm2 unsupport\r\n");
-                getchar();
+                //LDM(2)
+                ldm_type = 1;
             }
             
             uint8_t pc_include_flag = 0;
@@ -1167,7 +1183,14 @@ void execute(void)
                             pc_include_flag = 1;
                         }
                     }
-                    register_write(n, data);
+                    if(ldm_type) {
+                        //LDM(2)
+                        register_write_user_mode(n, data);
+                    } else {
+                        //LDM(1)
+                        register_write(n, data);
+                    }
+                    
                     PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, read_word(MEM, address), n);
                     if(!Pf) {
                         if(Uf) address += 4;
@@ -1189,10 +1212,10 @@ void execute(void)
             }
             
         } else {
-            
+            uint8_t stm_type = 0;
             if(Bit22) {
-                printf("[STM2] warn ldm bit22 set\r\n");
-                getchar();
+                //STM(2)
+                stm_type = 1;
             }
             //STM
             uint32_t address = operand1;
@@ -1203,7 +1226,14 @@ void execute(void)
                         if(Uf) address += 4;
                         else address -= 4;
                     }
-                    write_word(MEM, address, register_read(n));
+                    if(stm_type) {
+                        //STM(2)
+                        write_word(MEM, address, register_read_user_mode(n));
+                    } else {
+                        //STM(1)
+                        write_word(MEM, address, register_read(n));
+                    }
+                    
                     PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", n, register_read(n), address);
                     if(!Pf) {
                         if(Uf) address += 4;
@@ -1218,23 +1248,52 @@ void execute(void)
             }
         }
     } else if(code_type == code_is_msr1 || code_type == code_is_msr0) {
+        uint8_t cpu_mode = get_cpu_mode_code();
         if(!Bit22) {
+            //write cpsr
+            if(cpsr_m == CPSR_M_USR && (Rn&0x7) ) {
+                printf("[MSR] cpu is user mode, flags field can write only\r\n");
+            }
+            
             if(IS_SET(Rn, 0) ) {
                 cpsr &= 0xffffff00;
                 cpsr |= aluout&0xff;
-            } else if(IS_SET(Rn, 1) ) {
+            }
+            if(IS_SET(Rn, 1) ) {
                 cpsr &= 0xffff00ff;
                 cpsr |= aluout&0xff00;
-            } else if(IS_SET(Rn, 2) ) {
+            }
+            if(IS_SET(Rn, 2) ) {
                 cpsr &= 0xff00ffff;
                 cpsr |= aluout&0xff0000;
-            } else if(IS_SET(Rn, 3) ) {
+            }
+            if(IS_SET(Rn, 3) ) {
                 cpsr &= 0x00ffffff;
                 cpsr |= aluout&0xff000000;
             }
             PRINTF("write register cpsr = 0x%x\r\n", cpsr);
         } else {
-            printf("spsr not support todo...\r\n");
+            //write spsr
+            if(cpu_mode == 0) {
+                printf("[MSR] user mode has not spsr\r\n");
+            }
+            if(IS_SET(Rn, 0) ) {
+                spsr[cpu_mode] &= 0xffffff00;
+                spsr[cpu_mode] |= aluout&0xff;
+            }
+            if(IS_SET(Rn, 1) ) {
+                spsr[cpu_mode] &= 0xffff00ff;
+                spsr[cpu_mode] |= aluout&0xff00;
+            }
+            if(IS_SET(Rn, 2) ) {
+                spsr[cpu_mode] &= 0xff00ffff;
+                spsr[cpu_mode] |= aluout&0xff0000;
+            }
+            if(IS_SET(Rn, 3) ) {
+                spsr[cpu_mode] &= 0x00ffffff;
+                spsr[cpu_mode] |= aluout&0xff000000;
+            }
+            PRINTF("write register spsr_%d = 0x%x\r\n", cpu_mode, spsr[cpu_mode]);
         }
     } else if(code_type == code_is_mult) {
         register_write(Rn, aluout);   //Rd and Rn swap, !!!
@@ -1286,7 +1345,7 @@ void reset_proc(void)
 int main()
 {
     //load_program_memory("./Hello/Obj/hello.bin");
-    load_program_memory("./arm_hello_gcc/hello.bin");
+    load_program_memory("./arm_freertos/hello.bin");
     reset_proc();
     
     while(1) {
@@ -1308,7 +1367,7 @@ int main()
 #if 0
         if(abort_test) {
             exception_out();
-            abort_test = 0;
+            //abort_test = 0;
         }
 #endif
        
