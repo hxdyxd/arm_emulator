@@ -37,19 +37,6 @@ int _write( int file, char *ptr, int len)
 
 
 
-static void vTaskTest(void *param)
-{
-    while(1) {
-        printf("\r\n--------------------------------[ARM9]--------------------------\r\n");
-        vTaskDelay( 1000 );
-        printf("\r\n acos(0) %f \r\n", acos(0));
-        vTaskDelay( 1000 );
-        printf("\r\n exp(1) %f \r\n", exp(1));
-        vTaskDelay( 1000 );
-        printf("\r\n log(10) %f \r\n", log(10));
-        vTaskDelay( 1000 );
-    }
-}
 
 
 void pi_test(void)
@@ -64,7 +51,21 @@ void pi_test(void)
 }
 
 
-static void vTaskSinTest(void *param)
+static void math_task(void *param)
+{
+    while(1) {
+        printf("\r\n--------------------------------[ARM9]--------------------------\r\n");
+        vTaskDelay( 1000 );
+        printf("\r\n acos(0) %f \r\n", acos(0));
+        vTaskDelay( 1000 );
+        printf("\r\n exp(1) %f \r\n", exp(1));
+        vTaskDelay( 1000 );
+        printf("\r\n log(10) %f \r\n", log(10));
+        vTaskDelay( 1000 );
+    }
+}
+
+static void pi_task(void *param)
 {
     while(1) {
         pi_test();
@@ -72,25 +73,25 @@ static void vTaskSinTest(void *param)
     }
 }
 
-
 int main(void)
 {
     printf("\r\n\r\n[ARM9 FREERTOS] Build , %s %s \r\n", __DATE__, __TIME__);
 
-    if(xTaskCreate( vTaskTest, "Test", 512, NULL, ( tskIDLE_PRIORITY + 2 ), NULL ) != pdPASS) {
-        printf("task1 create failed\r\n");
+    if(xTaskCreate( math_task, "MathTest", 256, NULL, ( tskIDLE_PRIORITY + 3 ), NULL ) != pdPASS) {
+        goto exit;
     }
     printf("task1 create ok!\r\n");
 
-    if(xTaskCreate( vTaskSinTest, "SinTest", 256, NULL, ( tskIDLE_PRIORITY + 2 ), NULL ) != pdPASS) {
-        printf("task2 create failed\r\n");
+    if(xTaskCreate( pi_task, "PiTest", 256, NULL, ( tskIDLE_PRIORITY + 2 ), NULL ) != pdPASS) {
+        goto exit;
     }
     printf("task2 create ok!\r\n");
 
     vTaskStartScheduler();
-    while(1) {
-        putchar('w');
-    }
+
+exit:
+    printf("task create error\r\n");
+    while(1);
 }
 
 
