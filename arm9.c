@@ -1339,13 +1339,41 @@ void reset_proc(void)
     for(i = CODE_SIZE; i < CODE_SIZE + RAM_SIZE; i++) {
         MEM[i] = 0;
     }
+    code_counter = 0;
 }
 
 
-int main()
+float speed_calibration(char *path)
 {
-    //load_program_memory("./Hello/Obj/hello.bin");
-    load_program_memory("./arm_freertos/hello.bin");
+    load_program_memory(path);
+    reset_proc();
+    
+    clock_t clk = clock();
+    while(code_counter < 5000000) {
+        fetch();
+        decode();
+        execute();
+        
+        code_counter++;
+    }
+    clk = clock() - clk;
+    float kips_speed = code_counter/(clk*1000.0/CLOCKS_PER_SEC);
+    
+    printf("\r\n----------------------------------------------\r\n\r\n");
+    printf("emulator speed = %.2f KIPS\r\n", kips_speed);
+    printf("emulator time = %.1f ms\r\n", clk*1000.0/CLOCKS_PER_SEC);
+    printf("\r\n----------------------------------------------\r\n");
+    return kips_speed;
+}
+
+
+int main(char argc, char **argv)
+{
+    char *path = "./arm_freertos/hello.bin";
+    
+    uint32_t kips_speed = (uint32_t)speed_calibration(path);
+    
+    load_program_memory(path);
     reset_proc();
     
     while(1) {
@@ -1354,7 +1382,7 @@ int main()
         execute();
         
         //per millisecond timer irq test
-        if(code_counter%15000 == 0) {
+        if(code_counter%kips_speed == 0) {
             interrupt_exception(CPSR_M_IRQ);
         }
         
