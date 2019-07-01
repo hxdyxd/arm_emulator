@@ -260,6 +260,65 @@ static void write_byte(uint8_t *mem, unsigned int address, unsigned char data)
     *data_p = data;
 }
 
+/**************************************************************************/
+
+/*
+ *  CP15
+ */
+static uint32_t Register_cp15[16] = {0,};
+
+uint32_t mmu_transfer(uint32_t vaddr)
+{
+    //section page table, store size 16KB
+    uint32_t page_table_entry = read_word(MEM, (Register_cp15[2] << 14)|((vaddr&0xFFF00000) >> 18));
+    
+    switch(page_table_entry&3) {
+    case 2:
+        //section entry
+        return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
+    case 1:
+        //coarse page table, store size 1KB
+        page_table_entry = read_word(MEM, (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10));
+        switch(page_table_entry&3) {
+        case 1:
+            //large page, 64KB
+            return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+        case 2:
+            //small page, 4KB
+            return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+        default:
+            printf("[MMU] L2 error\r\n");
+            break;
+        }
+        break;
+    case 3:
+        //fine page table, store size 4KB
+        page_table_entry = read_word(MEM, (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8));
+        switch(page_table_entry&3) {
+        case 1:
+            //large page, 64KB
+            return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+        case 2:
+            //small page, 4KB
+            return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+        case 3:
+            //tiny page, 1KB
+            return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
+        default:
+            printf("[MMU] L2 error\r\n");
+            break;
+        }
+        break;
+    default:
+        printf("[MMU] L1 error\r\n");
+        break;
+    }
+    return 0xffffffff;
+}
+
+
+
+/**************************************************************************/
 
 //load_program_memory reads the input memory, and populates the instruction 
 // memory
