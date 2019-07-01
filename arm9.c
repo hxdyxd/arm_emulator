@@ -58,7 +58,7 @@ unsigned int spsr[7] = {0, };
 
 
 //memory
-static unsigned char MEM[MEM_SIZE];
+static uint8_t MEM[MEM_SIZE];
 
 //intermediate datapath and control path signals
 static unsigned int instruction_word;
@@ -188,7 +188,7 @@ static inline void exception_out(void)
 }
 
 
-static int read_word(char *mem, unsigned int address)
+static int read_word(uint8_t *mem, unsigned int address)
 {
     int *data;
     if(address >= MEM_SIZE) {
@@ -210,7 +210,7 @@ static int read_word(char *mem, unsigned int address)
 }
 
 
-static void write_word(char *mem, unsigned int address, unsigned int data)
+static void write_word(uint8_t *mem, unsigned int address, unsigned int data)
 {
     int *data_p;
     if(address >= MEM_SIZE || (address&3) != 0) {
@@ -228,7 +228,7 @@ static void write_word(char *mem, unsigned int address, unsigned int data)
 }
 
 
-static void write_halfword(char *mem, unsigned int address, unsigned short data)
+static void write_halfword(uint8_t *mem, unsigned int address, unsigned short data)
 {
     short *data_p;
     if(address >= MEM_SIZE || (address&1) != 0 
@@ -244,7 +244,7 @@ static void write_halfword(char *mem, unsigned int address, unsigned short data)
 }
 
 
-static void write_byte(char *mem, unsigned int address, unsigned char data)
+static void write_byte(uint8_t *mem, unsigned int address, unsigned char data)
 {
     char *data_p;
     if(address >= MEM_SIZE
@@ -1367,7 +1367,7 @@ float speed_calibration(char *path)
 }
 
 
-int main(char argc, char **argv)
+int main(int argc, char **argv)
 {
     char *path = "./arm_freertos/hello.bin";
     
