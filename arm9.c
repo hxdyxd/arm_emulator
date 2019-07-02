@@ -199,7 +199,7 @@ static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
     int *data;
     
     if(mmu) {
-        address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0);
+        address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0); //read
     }
     
     if(address >= MEM_SIZE) {
@@ -221,10 +221,10 @@ static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
 }
 
 
-static void write_word(uint8_t *mem, unsigned int address, unsigned int data)
+static inline void write_word(uint8_t *mem, unsigned int address, unsigned int data)
 {
     int *data_p;
-    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0);
+    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 1); //write
     
     if(address >= MEM_SIZE || (address&3) != 0) {
         printf("mem error, write word 0x%0x\r\n", address);
@@ -241,10 +241,10 @@ static void write_word(uint8_t *mem, unsigned int address, unsigned int data)
 }
 
 
-static void write_halfword(uint8_t *mem, unsigned int address, unsigned short data)
+static inline void write_halfword(uint8_t *mem, unsigned int address, unsigned short data)
 {
     short *data_p;
-    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0);
+    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 1); //write
     
     if(address >= MEM_SIZE || (address&1) != 0 
 #if MEM_CODE_READONLY
@@ -259,10 +259,10 @@ static void write_halfword(uint8_t *mem, unsigned int address, unsigned short da
 }
 
 
-static void write_byte(uint8_t *mem, unsigned int address, unsigned char data)
+static inline void write_byte(uint8_t *mem, unsigned int address, unsigned char data)
 {
     char *data_p;
-    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0);
+    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 1); //write
     
     if(address >= MEM_SIZE
 #if MEM_CODE_READONLY
