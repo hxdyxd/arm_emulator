@@ -4,6 +4,9 @@
 #include <stdint.h>
 #include <time.h>
 
+static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr);
+
+
 /****************************************************/
 //Memary size
 
@@ -188,9 +191,17 @@ static inline void exception_out(void)
 }
 
 
-static int read_word(uint8_t *mem, unsigned int address)
+
+#define  read_word(m,a)       read_mem(m,a,1)
+
+static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
 {
     int *data;
+    
+    if(mmu) {
+        address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0);
+    }
+    
     if(address >= MEM_SIZE) {
         printf("mem overflow error, read 0x%x\r\n", address);
         exception_out();
@@ -213,6 +224,8 @@ static int read_word(uint8_t *mem, unsigned int address)
 static void write_word(uint8_t *mem, unsigned int address, unsigned int data)
 {
     int *data_p;
+    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0);
+    
     if(address >= MEM_SIZE || (address&3) != 0) {
         printf("mem error, write word 0x%0x\r\n", address);
         exception_out();
@@ -231,6 +244,8 @@ static void write_word(uint8_t *mem, unsigned int address, unsigned int data)
 static void write_halfword(uint8_t *mem, unsigned int address, unsigned short data)
 {
     short *data_p;
+    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0);
+    
     if(address >= MEM_SIZE || (address&1) != 0 
 #if MEM_CODE_READONLY
      || address < CODE_SIZE
@@ -247,6 +262,8 @@ static void write_halfword(uint8_t *mem, unsigned int address, unsigned short da
 static void write_byte(uint8_t *mem, unsigned int address, unsigned char data)
 {
     char *data_p;
+    address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0);
+    
     if(address >= MEM_SIZE
 #if MEM_CODE_READONLY
      || address < CODE_SIZE
@@ -267,55 +284,187 @@ static void write_byte(uint8_t *mem, unsigned int address, unsigned char data)
  */
 static uint32_t Register_cp15[16] = {0,};
 
-uint32_t mmu_transfer(uint32_t vaddr)
+//mmu enable
+#define  cp15_ctl_m  IS_SET(Register_cp15[1], 0)
+//Alignment fault checking
+#define  cp15_ctl_a  IS_SET(Register_cp15[1], 1)
+//System protection bit
+#define  cp15_ctl_s  IS_SET(Register_cp15[1], 8)
+//ROM protection bit
+#define  cp15_ctl_r  IS_SET(Register_cp15[1], 9)
+//high vectors
+#define  cp15_ctl_v  IS_SET(Register_cp15[1], 13)
+
+
+/*
+ *  uint8_t wr:                write: 1, read: 0
+ *  uint8_t privileged:   privileged: 1, user: 0
+ */
+static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, uint8_t wr)
 {
-    //section page table, store size 16KB
-    uint32_t page_table_entry = read_word(MEM, (Register_cp15[2] << 14)|((vaddr&0xFFF00000) >> 18));
-    
-    switch(page_table_entry&3) {
-    case 2:
-        //section entry
-        return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
-    case 1:
-        //coarse page table, store size 1KB
-        page_table_entry = read_word(MEM, (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10));
-        switch(page_table_entry&3) {
-        case 1:
-            //large page, 64KB
-            return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
-        case 2:
-            //small page, 4KB
-            return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
-        default:
-            printf("[MMU] L2 error\r\n");
-            break;
+    switch(ap) {
+    case 0:
+        if(!cp15_ctl_s && cp15_ctl_r && !wr)
+            return 0;
+        if(cp15_ctl_s && !cp15_ctl_r && !wr && privileged)
+            return 0;
+        if(cp15_ctl_s && cp15_ctl_r) {
+            printf("mmu_check_access_permissions fault\r\n");
+            exception_out();
         }
+        break;
+    case 1:
+        if(privileged)
+            return 0;
+        break;
+    case 2:
+        if(privileged || !wr)
+            return 0;
         break;
     case 3:
-        //fine page table, store size 4KB
-        page_table_entry = read_word(MEM, (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8));
-        switch(page_table_entry&3) {
-        case 1:
-            //large page, 64KB
-            return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
-        case 2:
-            //small page, 4KB
-            return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
-        case 3:
-            //tiny page, 1KB
-            return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
-        default:
-            printf("[MMU] L2 error\r\n");
-            break;
+        return 0;
+    }
+    return -1; //No access
+}
+
+
+/*
+ *  uint8_t wr:                write: 1, read: 0
+ *  uint8_t privileged:   privileged: 1, user: 0
+ */
+static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr)
+{
+    if(!cp15_ctl_m) {
+        return vaddr;
+    }
+    if(cp15_ctl_a) {
+        //Check address alignment
+        
+    }
+    //section page table, store size 16KB
+    uint32_t page_table_entry = read_mem(MEM, (Register_cp15[2]&0xFFFFC000)|((vaddr&0xFFF00000) >> 18), 0);
+    uint8_t first_level_descriptor = page_table_entry&3;
+    if(first_level_descriptor == 0) {
+        //Section translation fault
+        
+    } else if(first_level_descriptor == 2) {
+        //section entry
+        uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
+        domain <<= 1;
+        domain = (Register_cp15[3] >> domain)&0x3;
+        if(domain == 0) {
+            //Section domain fault
+            printf("Section domain fault\r\n");
+            getchar();
+        } else if(domain == 1) {
+            //Client, Check access permissions
+            uint8_t ap = (page_table_entry>>10)&0x3;
+            if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
+                return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
+            } else {
+                //Section permission fault
+                printf("Section permission fault\r\n");
+                getchar();
+            }
+        } else if(domain == 3) {
+            //Manager
+            return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
+        } else {
+            printf("mmu fault\r\n");
+            exception_out();
         }
-        break;
-    default:
-        printf("[MMU] L1 error\r\n");
-        break;
+        
+    } else {
+        //page table
+        uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
+        domain <<= 1;
+        domain = (Register_cp15[3] >> domain)&0x3;
+        if(first_level_descriptor == 1) {
+            //coarse page table, store size 1KB
+            page_table_entry = read_mem(MEM, (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10), 0);
+        } else if(first_level_descriptor == 3) {
+            //fine page table, store size 4KB
+            page_table_entry = read_mem(MEM, (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8), 0);
+        } else {
+            printf("mmu fault\r\n");
+            exception_out();
+        }
+        uint8_t second_level_descriptor = page_table_entry&3;
+        if(second_level_descriptor == 0) {
+            //Page translation fault
+            printf("Page translation fault\r\n");
+            getchar();
+        } else {
+            if(domain == 0) {
+                //Page domain fault
+                printf("Page domain fault\r\n");
+                getchar();
+            } else if(domain == 1) {
+                //Client, Check access permissions
+                uint8_t ap;
+                switch(second_level_descriptor) {
+                case 1:
+                {
+                    break;
+                    //large page, 64KB
+                    uint8_t subpage = (vaddr >> 14)&3;
+                    subpage <<= 1;
+                    ap = page_table_entry >> (subpage+4);
+                    if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
+                        return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+                    } else {
+                        //Sub-page permission fault
+                        printf("Sub-page permission fault\r\n");
+                        getchar();
+                    }
+                }
+                case 2:
+                {
+                    //small page, 4KB
+                    uint8_t subpage = (vaddr >> 10)&3;
+                    subpage <<= 1;
+                    ap = page_table_entry >> (subpage+4);
+                    if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
+                        return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+                    } else {
+                        //Sub-page permission fault
+                        printf("Sub-page permission fault\r\n");
+                        getchar();
+                    }
+                }
+                case 3:
+                    //tiny page, 1KB
+                    ap = (page_table_entry>>4)&0x3; //ap0
+                    if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
+                        return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
+                    } else {
+                        //Sub-page permission fault
+                        printf("Sub-page permission fault\r\n");
+                        getchar();
+                    }
+                }
+                
+            } else if(domain == 3) {
+                //Manager
+                switch(second_level_descriptor) {
+                case 1:
+                    //large page, 64KB
+                    return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+                case 2:
+                    //small page, 4KB
+                    return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+                case 3:
+                    //tiny page, 1KB
+                    return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
+                }
+            } else {
+                printf("mmu fault\r\n");
+                exception_out();
+            }
+        }
     }
     return 0xffffffff;
 }
-
 
 
 /**************************************************************************/
