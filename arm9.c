@@ -12,10 +12,10 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
 /****************************************************/
 //Memary size
 
-#define CODE_SIZE   0x10000
-#define RAM_SIZE    0xf000
+#define CODE_SIZE   0x800000
+#define RAM_SIZE    0x0
 
-#define MEM_SIZE  0x24000
+#define MEM_SIZE  0x800000  //8M
 /****************************************************/
 
 #define DEBUG                  0
@@ -174,6 +174,7 @@ static inline void register_write(uint8_t id, uint32_t val)
 
 static inline void exception_out(void)
 {
+    //return;
     printf("PC = 0x%x , code = %d\r\n", register_read(15), code_counter);
     printf("cpsr = 0x%x\n", cpsr);
     printf("User mode register:");
@@ -204,18 +205,20 @@ static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
         address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0); //read
     }
     
-    if(address >= MEM_SIZE) {
-        printf("mem overflow error, read 0x%x\r\n", address);
-        exception_out();
-    }
-    
-    if(address == 0x1f020) {
+    if(address == 0x4001f000) {
+        return 1;
+    } else if(address == 0x4001f020) {
         //sys clock ms
         uint32_t clk1ms = (clock()*1000/CLOCKS_PER_SEC);
         return clk1ms;
-    } else if(address == 0x1f030) {
+    } else if(address == 0x4001f030) {
         //ips
         return code_counter;
+    }
+    
+    if(address >= MEM_SIZE) {
+        printf("mem overflow error, read 0x%x\r\n", address);
+        exception_out();
     }
     
     data =  (int*) (mem + address);
@@ -228,14 +231,15 @@ static inline void write_word(uint8_t *mem, unsigned int address, unsigned int d
     int *data_p;
     address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 1); //write
     
-    if(address >= MEM_SIZE || (address&3) != 0) {
-        printf("mem error, write word 0x%0x\r\n", address);
-        exception_out();
-    }
-    if(address == 0x1f030) {
+    if(address == 0x4001f030) {
         //ips
         code_counter = data;
         return;
+    }
+    
+    if(address >= MEM_SIZE || (address&3) != 0) {
+        printf("mem error, write word 0x%0x\r\n", address);
+        exception_out();
     }
     
     data_p = (int *) (mem + address);
@@ -266,6 +270,11 @@ static inline void write_byte(uint8_t *mem, unsigned int address, unsigned char 
     char *data_p;
     address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 1); //write
     
+    if(address == 0x4001f004) {
+        putchar(data);
+        return;
+    }
+    
     if(address >= MEM_SIZE
 #if MEM_CODE_READONLY
      || address < CODE_SIZE
@@ -274,7 +283,7 @@ static inline void write_byte(uint8_t *mem, unsigned int address, unsigned char 
         printf("mem error, write byte 0x%0x\r\n", address);
         exception_out();
     }
-    if(address == 0x1f004) putchar(data);
+    
     data_p = (char *) (mem + address);
     *data_p = data;
 }
@@ -341,7 +350,7 @@ static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, u
  */
 static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr)
 {
-    if(!cp15_ctl_m) {
+    if(!cp15_ctl_m || 0x4001f000 == vaddr || 0x4001f004 == vaddr) {
         return vaddr;
     }
     if(cp15_ctl_a) {
@@ -353,8 +362,8 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
     uint8_t first_level_descriptor = page_table_entry&3;
     if(first_level_descriptor == 0) {
         //Section translation fault
-        printf("Section translation fault\r\n");
-        getchar();
+        printf("Section translation fault va = 0x%x\r\n", vaddr);
+        exception_out();
     } else if(first_level_descriptor == 2) {
         //section entry
         uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
@@ -479,7 +488,7 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
 
 //load_program_memory reads the input memory, and populates the instruction 
 // memory
-void load_program_memory(char *file_name)
+uint32_t load_program_memory(char *file_name, uint32_t start)
 {
     FILE *fp;
     unsigned int address, instruction;
@@ -488,14 +497,15 @@ void load_program_memory(char *file_name)
         printf("Error opening input mem file\n");
         exception_out();
     }
-    address = 0;
+    address = start;
     while(!feof(fp)) {
         fread(&instruction, 4, 1, fp);
         write_word(MEM, address, instruction);
         address = address + 4;
     }
-    printf("load mem size = 0x%x \r\n", address);
+    printf("load mem start 0x%x, size 0x%x \r\n", start, address - start);
     fclose(fp);
+    return address - start;
 }
 
 
@@ -529,6 +539,7 @@ void interrupt_exception(uint8_t type)
         register_write(14, next_pc + 4);  //write R14_irq
         break;
     default:
+        printf("unknow interrupt\r\n");
         exception_out();
     }
 }
@@ -537,7 +548,7 @@ void interrupt_exception(uint8_t type)
 void fetch(void)
 {
     uint32_t pc = register_read(15) - 4; //current pc
-    if(pc >= CODE_SIZE || ((pc&3) != 0)) {
+    if(((pc&3) != 0)) {
         PRINTF("[FETCH] error, pc[0x%x] overflow \r\n", pc);
         exception_out();
     }
@@ -1043,16 +1054,30 @@ void execute(void)
         shifter_flag = 0;  //no need to use shift
     } else if(code_type == code_is_mcr) {
         shifter_flag = 0;  //no need to use shift
-        
+        uint8_t op2 = (instruction_word >> 5)&0x7;
         //  cp_num       Rs
         //  register     Rd
         //  cp_register  Rn
         if(Bit20) {
             //mrc
             if(Rs == 15) {
-                uint32_t cp15_val = cp15_read(Rn);
+                uint32_t cp15_val;
+                if(Rn) {
+                    cp15_val = cp15_read(Rn);
+                } else {
+                    //register 0
+                    if(op2) {
+                        //Cache Type register
+                        cp15_val = 0;
+                        printf("Cache Type register\r\n");
+                        //exception_out();
+                    } else {
+                        //Main ID register
+                        cp15_val = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5;
+                    }
+                }
                 register_write(Rd, cp15_val);
-                PRINTF("read cp%d_c%d[0x%x] to R%d \r\n", Rs, Rn, cp15_val, Rd);
+                PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, Rn, cp15_val, op2, Rd);
             } else {
                 printf("read cp%d_c%d \r\n", Rs, Rn);
                 getchar();
@@ -1604,7 +1629,7 @@ void reset_proc(void)
 
 float speed_calibration(char *path)
 {
-    load_program_memory(path);
+    load_program_memory(path, 0);
     reset_proc();
     
     clock_t clk = clock();
@@ -1628,12 +1653,17 @@ float speed_calibration(char *path)
 
 int main(int argc, char **argv)
 {
-    char *path = "./arm_freertos_mmu_test/hello.bin";
+    char *path = "./arm_linux/zImage";
+    char *dtb_path = "./arm_linux/arm-emulator.dtb";
     
-    uint32_t kips_speed = (uint32_t)speed_calibration(path);
+    uint32_t kips_speed = 15000; //(uint32_t)speed_calibration(path);
     
-    load_program_memory(path);
+    load_program_memory(path, 0);
+    load_program_memory(dtb_path, MEM_SIZE - 0x4000);
     reset_proc();
+    
+    register_write(1, 0xffffffff);
+    register_write(2, MEM_SIZE - 0x4000);
     
     while(1) {
         fetch();
@@ -1645,10 +1675,10 @@ int main(int argc, char **argv)
             interrupt_exception(CPSR_M_IRQ);
         }
         
-        
 #if DEBUG
         if(getchar() == 'c') {
             exception_out();
+            getchar();
         }
 #endif
 #if 0
