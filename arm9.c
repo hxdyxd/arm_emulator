@@ -2,7 +2,9 @@
 /* By hxdyxd */
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include <time.h>
+
 
 static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr);
 
@@ -13,7 +15,7 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
 #define CODE_SIZE   0x10000
 #define RAM_SIZE    0xf000
 
-#define MEM_SIZE  0x20000
+#define MEM_SIZE  0x24000
 /****************************************************/
 
 #define DEBUG                  0
@@ -284,6 +286,11 @@ static inline void write_byte(uint8_t *mem, unsigned int address, unsigned char 
  */
 static uint32_t Register_cp15[16] = {0,};
 
+#define   cp15_read(r)      Register_cp15[r]
+#define   cp15_write(r,d)   Register_cp15[r] = d
+#define   cp15_reset()      memset(Register_cp15, 0, sizeof(Register_cp15))
+
+
 //mmu enable
 #define  cp15_ctl_m  IS_SET(Register_cp15[1], 0)
 //Alignment fault checking
@@ -346,7 +353,8 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
     uint8_t first_level_descriptor = page_table_entry&3;
     if(first_level_descriptor == 0) {
         //Section translation fault
-        
+        printf("Section translation fault\r\n");
+        getchar();
     } else if(first_level_descriptor == 2) {
         //section entry
         uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
@@ -560,6 +568,7 @@ void fetch(void)
 #define  code_is_dp0     19
 #define  code_is_msr0    20
 #define  code_is_mrs     21
+#define  code_is_mcr     22
 #define  code_is_unknow  255
 
 
@@ -839,15 +848,28 @@ void decode(void)
         //Coprocessor load/store and double register transfers
         code_type = code_is_unknow;
         printf("Coprocessor todo... \r\n");
+        exception_out();
         break;
     case 7:
         //software interrupt
-        code_type = code_is_swi;
-        PRINTF("swi \r\n");
+        if(IS_SET(instruction_word, 24)) {
+            code_type = code_is_swi;
+            PRINTF("swi \r\n");
+        } else {
+            if(Bit4) {
+                //Coprocessor move to register
+                code_type = code_is_mcr;
+                PRINTF("mcr \r\n");
+            } else {
+                printf("Coprocessor data processing todo... \r\n");
+                exception_out();
+            }
+        }
         break;
     default:
         code_type = code_is_unknow;
         printf("undefed\r\n");
+        exception_out();
     }
 }
 
@@ -1019,6 +1041,34 @@ void execute(void)
         return;
     } else if(code_type == code_is_mrs) {
         shifter_flag = 0;  //no need to use shift
+    } else if(code_type == code_is_mcr) {
+        shifter_flag = 0;  //no need to use shift
+        
+        //  cp_num       Rs
+        //  register     Rd
+        //  cp_register  Rn
+        if(Bit20) {
+            //mrc
+            if(Rs == 15) {
+                uint32_t cp15_val = cp15_read(Rn);
+                register_write(Rd, cp15_val);
+                PRINTF("read cp%d_c%d[0x%x] to R%d \r\n", Rs, Rn, cp15_val, Rd);
+            } else {
+                printf("read cp%d_c%d \r\n", Rs, Rn);
+                getchar();
+            }
+        } else {
+            //mcr
+            uint32_t register_val = register_read(Rd);
+            if(Rs == 15) {
+                cp15_write(Rn, register_val);
+                PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, Rs, Rn);
+            } else {
+                printf("write to cp%d_c%d \r\n", Rs, Rn);
+                getchar();
+            }
+        }
+        return;
     } else {
         printf("unknow code_type = %d", code_type);
         getchar();
@@ -1541,6 +1591,7 @@ void reset_proc(void)
     cpsr = CPSR_M_SVC;
     cpsr_i_set(1);  //disable irq
     cpsr_f_set(1);  //disable fiq
+    cp15_reset();
     for(i=0; i<16; i++) {
         register_write(i, 0);
     }
@@ -1577,7 +1628,7 @@ float speed_calibration(char *path)
 
 int main(int argc, char **argv)
 {
-    char *path = "./arm_freertos/hello.bin";
+    char *path = "./arm_freertos_mmu_test/hello.bin";
     
     uint32_t kips_speed = (uint32_t)speed_calibration(path);
     
