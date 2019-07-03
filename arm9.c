@@ -209,6 +209,7 @@ static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
         return 1;
     } else if(address == 0x4001f020) {
         //sys clock ms
+        printf("get clk \r\n");
         uint32_t clk1ms = (clock()*1000/CLOCKS_PER_SEC);
         return clk1ms;
     } else if(address == 0x4001f030) {
@@ -350,7 +351,7 @@ static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, u
  */
 static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr)
 {
-    if(!cp15_ctl_m || 0x4001f000 == vaddr || 0x4001f004 == vaddr) {
+    if(!cp15_ctl_m) {
         return vaddr;
     }
     if(cp15_ctl_a) {
@@ -426,13 +427,13 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                     //large page, 64KB
                     uint8_t subpage = (vaddr >> 14)&3;
                     subpage <<= 1;
-                    ap = page_table_entry >> (subpage+4);
+                    ap = (page_table_entry >> (subpage+4))&0x3;
                     if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
                         return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
                     } else {
                         //Sub-page permission fault
-                        printf("Sub-page permission fault\r\n");
-                        getchar();
+                        printf("Sub-page permission fault %d %d\r\n", privileged, wr);
+                        exception_out();
                     }
                 }
                 case 2:
@@ -440,13 +441,14 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                     //small page, 4KB
                     uint8_t subpage = (vaddr >> 10)&3;
                     subpage <<= 1;
-                    ap = page_table_entry >> (subpage+4);
+                    ap = (page_table_entry >> (subpage+4))&0x3;
                     if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
                         return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
                     } else {
                         //Sub-page permission fault
-                        printf("Sub-page permission fault\r\n");
-                        getchar();
+                        printf("Sub-page permission fault va = 0x%x %d %d %d\r\n",
+                         vaddr, ap, privileged, wr);
+                        exception_out();
                     }
                 }
                 case 3:
@@ -456,8 +458,8 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                         return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
                     } else {
                         //Sub-page permission fault
-                        printf("Sub-page permission fault\r\n");
-                        getchar();
+                        printf("Sub-page permission fault %d %d\r\n", privileged, wr);
+                        exception_out();
                     }
                 }
                 
@@ -513,11 +515,12 @@ void interrupt_exception(uint8_t type)
 {
     uint32_t cpsr_int = cpsr;
     uint32_t next_pc = register_read(15) - 4;  //lr 
-    PRINTF("[INT %d]cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri\r\n", type, cpsr_int, next_pc);
+    PRINTF("[INT %d]cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri \r\n", type, cpsr_int, next_pc);
     switch(type) {
     case CPSR_M_SVC:
         //swi
-        register_write(15, 0x8);
+        PRINTF("SVC\r\n");
+        register_write(15, 0x8|(cp15_ctl_v?0xffff0000:0));
         cpsr_i_set(1);  //disable irq
         cpsr_t_set(0);  //arm mode
         cpsr &= ~0x1f;
@@ -530,7 +533,8 @@ void interrupt_exception(uint8_t type)
         if(cpsr_i) {
             return;  //irq disable
         }
-        register_write(15, 0x18);
+        PRINTF("IRQ\r\n");
+        register_write(15, 0x18|(cp15_ctl_v?0xffff0000:0));
         cpsr_i_set(1);  //disable irq
         cpsr_t_set(0);  //arm mode
         cpsr &= ~0x1f;
@@ -553,7 +557,7 @@ void fetch(void)
         exception_out();
     }
     
-    instruction_word = read_word(MEM, register_read(15) - 4);
+    instruction_word = read_mem(MEM, register_read(15) - 4, 1);
     PRINTF("[0x%04x]: ", register_read(15) - 4);
     register_write(15, pc + 4 ); //current pc add 4
 }
@@ -1656,7 +1660,7 @@ int main(int argc, char **argv)
     char *path = "./arm_linux/zImage";
     char *dtb_path = "./arm_linux/arm-emulator.dtb";
     
-    uint32_t kips_speed = 15000; //(uint32_t)speed_calibration(path);
+    uint32_t kips_speed = 150000; //(uint32_t)speed_calibration(path);
     
     load_program_memory(path, 0);
     load_program_memory(dtb_path, MEM_SIZE - 0x4000);
@@ -1687,7 +1691,6 @@ int main(int argc, char **argv)
             //abort_test = 0;
         }
 #endif
-       
         code_counter++;
     }
     
