@@ -209,7 +209,6 @@ static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
         return 1;
     } else if(address == 0x4001f020) {
         //sys clock ms
-        printf("get clk \r\n");
         uint32_t clk1ms = (clock()*1000/CLOCKS_PER_SEC);
         return clk1ms;
     } else if(address == 0x4001f030) {
@@ -1073,8 +1072,7 @@ void execute(void)
                     if(op2) {
                         //Cache Type register
                         cp15_val = 0;
-                        printf("Cache Type register\r\n");
-                        //exception_out();
+                        //printf("Cache Type register\r\n");
                     } else {
                         //Main ID register
                         cp15_val = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5;
@@ -1097,6 +1095,16 @@ void execute(void)
                 getchar();
             }
         }
+        return;
+    } else if(code_type == code_is_swp) {
+        if(operand1 & 3) {
+            printf("swp error \r\n");
+            getchar();
+        }
+        
+        write_word(MEM, operand1, operand2);
+        register_write(Rd, operand1);
+        
         return;
     } else {
         printf("unknow code_type = %d", code_type);
