@@ -12,10 +12,10 @@ void interrupt_exception(uint8_t type);
 /****************************************************/
 //Memary size
 
-#define CODE_SIZE   0x2000000
+#define CODE_SIZE   (0x2000000)
 #define RAM_SIZE    0x0
 
-#define MEM_SIZE  0x2000000  //16M
+#define MEM_SIZE   (0x2000000)  //32M
 /****************************************************/
 
 #define DEBUG                  0
@@ -93,6 +93,17 @@ unsigned int Register[7][16];
 #define   CPU_MODE_Undef     4
 #define   CPU_MODE_Abort     5
 #define   CPU_MODE_Mon       6
+
+const char *string_register_mode[7] = {
+    "USER",
+    "FIQ",
+    "IRQ",
+    "SVC",
+    "Undef",
+    "Abort",
+    "Mon",
+};
+
 
 uint8_t get_cpu_mode_code(void)
 {
@@ -175,8 +186,9 @@ static inline void register_write(uint8_t id, uint32_t val)
 static inline void exception_out(void)
 {
     //return;
+    uint8_t cur_mode  = get_cpu_mode_code();
     printf("PC = 0x%x , code = %d\r\n", register_read(15), code_counter);
-    printf("cpsr = 0x%x\n", cpsr);
+    printf("cpsr = 0x%x, %s\n", cpsr, string_register_mode[cur_mode]);
     printf("User mode register:");
     for(int i=0; i<16; i++) {
         if(i % 4 == 0) {
@@ -188,10 +200,22 @@ static inline void exception_out(void)
     for(int i=1; i<7; i++) {
         printf("R%2d = 0x%08x, ", 13, Register[i][13]);
         printf("R%2d = 0x%08x, ", 14, Register[i][14]);
-        printf("%d \n", i);
+        printf("%s \n", string_register_mode[i]);
     }
     getchar();
 }
+
+/*
+ *  interrupt_exception
+ */
+#define  INT_EXCEPTION_RESET      (0)
+#define  INT_EXCEPTION_UNDEF      (1)
+#define  INT_EXCEPTION_FIQ        (2)
+#define  INT_EXCEPTION_IRQ        (3)
+#define  INT_EXCEPTION_PREABT     (4)
+#define  INT_EXCEPTION_SWI        (5)
+#define  INT_EXCEPTION_DATAABT    (6)
+
 
 /******************************interrupt**************************************/
 struct interrupt_register {
@@ -214,7 +238,7 @@ static inline void interrupt_happen(int id)
         return;
     }
     INT.PND |= 1 << id;
-    interrupt_exception(CPSR_M_IRQ);
+    interrupt_exception(INT_EXCEPTION_IRQ);
 }
 
 /******************************interrupt**************************************/
@@ -235,6 +259,7 @@ struct timer_register TIM;
 
 /*******************************timer*****************************************/
 
+#define  MMU_EXCEPTION_ADDR      0x4001f050
 
 #define  read_word(m,a)       read_mem(m,a,1)
 
@@ -259,6 +284,8 @@ static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
     } else if(address == 0x4001f030) {
         //ips
         return code_counter;
+    } else if(address == MMU_EXCEPTION_ADDR) {
+        return 0x00000012;
     }
     
     if(address >= MEM_SIZE) {
@@ -290,6 +317,8 @@ static inline void write_word(uint8_t *mem, unsigned int address, unsigned int d
         //timer
         TIM.EN = data;
         return;
+    } else if(address == MMU_EXCEPTION_ADDR) {
+        return;
     }
     
     if(address >= MEM_SIZE || (address&3) != 0) {
@@ -306,6 +335,10 @@ static inline void write_halfword(uint8_t *mem, unsigned int address, unsigned s
 {
     short *data_p;
     address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 1); //write
+    
+    if(address == MMU_EXCEPTION_ADDR) {
+        return;
+    }
     
     if(address >= MEM_SIZE || (address&1) != 0 
 #if MEM_CODE_READONLY
@@ -327,6 +360,8 @@ static inline void write_byte(uint8_t *mem, unsigned int address, unsigned char 
     
     if(address == 0x4001f004) {
         putchar(data);
+        return;
+    } else if(address == MMU_EXCEPTION_ADDR) {
         return;
     }
     
@@ -350,21 +385,41 @@ static inline void write_byte(uint8_t *mem, unsigned int address, unsigned char 
  */
 static uint32_t Register_cp15[16] = {0,};
 
+#define   cp15_ctl            Register_cp15[1]
+#define   cp15_ttb            Register_cp15[2]
+#define   cp15_domain         Register_cp15[3]
+/* Fault Status Register, [7:4]domain  [3:0]status */
+#define   cp15_fsr            Register_cp15[5]
+/* Fault Address Register */
+#define   cp15_far            Register_cp15[6]
+
+
+
 #define   cp15_read(r)      Register_cp15[r]
 #define   cp15_write(r,d)   Register_cp15[r] = d
 #define   cp15_reset()      memset(Register_cp15, 0, sizeof(Register_cp15))
 
 
 //mmu enable
-#define  cp15_ctl_m  IS_SET(Register_cp15[1], 0)
+#define  cp15_ctl_m  IS_SET(cp15_ctl, 0)
 //Alignment fault checking
-#define  cp15_ctl_a  IS_SET(Register_cp15[1], 1)
+#define  cp15_ctl_a  IS_SET(cp15_ctl, 1)
 //System protection bit
-#define  cp15_ctl_s  IS_SET(Register_cp15[1], 8)
+#define  cp15_ctl_s  IS_SET(cp15_ctl, 8)
 //ROM protection bit
-#define  cp15_ctl_r  IS_SET(Register_cp15[1], 9)
+#define  cp15_ctl_r  IS_SET(cp15_ctl, 9)
 //high vectors
-#define  cp15_ctl_v  IS_SET(Register_cp15[1], 13)
+#define  cp15_ctl_v  IS_SET(cp15_ctl, 13)
+
+uint8_t mmu_fault = 0;
+
+/*
+ *  return 1, mmu exception
+ */
+static inline uint8_t mmu_check_status(void)
+{
+    return mmu_fault;
+}
 
 
 /*
@@ -405,6 +460,7 @@ static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, u
  */
 static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr)
 {
+    mmu_fault = 0;
     if(!cp15_ctl_m) {
         return vaddr;
     }
@@ -413,33 +469,41 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
         
     }
     //section page table, store size 16KB
-    uint32_t page_table_entry = read_mem(MEM, (Register_cp15[2]&0xFFFFC000)|((vaddr&0xFFF00000) >> 18), 0);
+    uint32_t page_table_entry = read_mem(MEM, (cp15_ttb&0xFFFFC000)|((vaddr&0xFFF00000) >> 18), 0);
     uint8_t first_level_descriptor = page_table_entry&3;
     if(first_level_descriptor == 0) {
         //Section translation fault
-        printf("Section translation fault va = 0x%x\r\n", vaddr);
-        printf("PTE = 0x%x\r\n", page_table_entry);
-        exception_out();
+        cp15_fsr = 0x5;
+        cp15_far = vaddr;
+        mmu_fault = 1;
+        PRINTF("Section translation fault va = 0x%x\r\n", vaddr);
+        //exception_out();
     } else if(first_level_descriptor == 2) {
         //section entry
         uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
-        domain <<= 1;
-        domain = (Register_cp15[3] >> domain)&0x3;
-        if(domain == 0) {
+        uint8_t domainval = domain << 1;
+        domainval = (cp15_domain >> domainval)&0x3;
+        if(domainval == 0) {
             //Section domain fault
+            cp15_fsr = (domain << 4) | 0x9;
+            cp15_far = vaddr;
+            mmu_fault = 1;
             printf("Section domain fault\r\n");
-            getchar();
-        } else if(domain == 1) {
+            //getchar();
+        } else if(domainval == 1) {
             //Client, Check access permissions
             uint8_t ap = (page_table_entry>>10)&0x3;
             if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
                 return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
             } else {
                 //Section permission fault
+                cp15_fsr = (domain << 4) | 0xd;
+                cp15_far = vaddr;
+                mmu_fault = 1;
                 printf("Section permission fault\r\n");
-                getchar();
+                //getchar();
             }
-        } else if(domain == 3) {
+        } else if(domainval == 3) {
             //Manager
             return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
         } else {
@@ -450,8 +514,8 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
     } else {
         //page table
         uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
-        domain <<= 1;
-        domain = (Register_cp15[3] >> domain)&0x3;
+        uint8_t domainval =  domain << 1;
+        domainval = (Register_cp15[3] >> domainval)&0x3;
         if(first_level_descriptor == 1) {
             //coarse page table, store size 1KB
             page_table_entry = read_mem(MEM, (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10), 0);
@@ -465,14 +529,21 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
         uint8_t second_level_descriptor = page_table_entry&3;
         if(second_level_descriptor == 0) {
             //Page translation fault
-            printf("Page translation fault\r\n");
-            getchar();
+            cp15_fsr = (domain << 4) | 0x7;
+            cp15_far = vaddr;
+            mmu_fault = 1;
+            PRINTF("Page translation fault va = 0x%x %d %d\r\n",
+             vaddr, privileged, wr);
+            //exception_out();
         } else {
-            if(domain == 0) {
+            if(domainval == 0) {
                 //Page domain fault
+                cp15_fsr = (domain << 4) | 0xb;
+                cp15_far = vaddr;
+                mmu_fault = 1;
                 printf("Page domain fault\r\n");
-                getchar();
-            } else if(domain == 1) {
+                //getchar();
+            } else if(domainval == 1) {
                 //Client, Check access permissions
                 uint8_t ap;
                 switch(second_level_descriptor) {
@@ -487,8 +558,12 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                         return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
                     } else {
                         //Sub-page permission fault
-                        printf("Sub-page permission fault %d %d\r\n", privileged, wr);
-                        exception_out();
+                        cp15_fsr = (domain << 4) | 0xf;
+                        cp15_far = vaddr;
+                        mmu_fault = 1;
+                        PRINTF("Large Sub-page permission fault va = 0x%x %d %d %d\r\n",
+                         vaddr, ap, privileged, wr);
+                        //exception_out();
                     }
                 }
                 case 2:
@@ -501,9 +576,12 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                         return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
                     } else {
                         //Sub-page permission fault
-                        printf("Sub-page permission fault va = 0x%x %d %d %d\r\n",
+                        cp15_fsr = (domain << 4) | 0xf;
+                        cp15_far = vaddr;
+                        mmu_fault = 1;
+                        PRINTF("Small Sub-page permission fault va = 0x%x %d %d %d\r\n",
                          vaddr, ap, privileged, wr);
-                        exception_out();
+                        //exception_out();
                     }
                 }
                 case 3:
@@ -513,12 +591,16 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                         return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
                     } else {
                         //Sub-page permission fault
-                        printf("Sub-page permission fault %d %d\r\n", privileged, wr);
-                        exception_out();
+                        cp15_fsr = (domain << 4) | 0xf;
+                        cp15_far = vaddr;
+                        mmu_fault = 1;
+                        PRINTF("Tiny Sub-page permission fault va = 0x%x %d %d %d\r\n",
+                         vaddr, ap, privileged, wr);
+                        //exception_out();
                     }
                 }
                 
-            } else if(domain == 3) {
+            } else if(domainval == 3) {
                 //Manager
                 switch(second_level_descriptor) {
                 case 1:
@@ -537,7 +619,24 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
             }
         }
     }
-    return 0xffffffff;
+    return MMU_EXCEPTION_ADDR;
+}
+
+
+static void dump_ttb(void)
+{
+    uint32_t vaddr;
+    printf("ttb base = 0x%x\r\n", cp15_ttb);
+    for(vaddr=0; ; vaddr+=0x400) {
+        uint32_t paddr = mmu_transfer(vaddr, 0, 0);
+        if(!mmu_check_status()) {
+            printf("vaddr 0x%x -> paddr 0x%x\r\n", vaddr, paddr );
+        }
+        if(vaddr>=0x08000000) {
+            break;
+        }
+    }
+    getchar();
 }
 
 
@@ -566,24 +665,14 @@ uint32_t load_program_memory(char *file_name, uint32_t start)
 }
 
 
+
 void interrupt_exception(uint8_t type)
 {
     uint32_t cpsr_int = cpsr;
     uint32_t next_pc = register_read(15) - 4;  //lr 
     PRINTF("[INT %d]cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri \r\n", type, cpsr_int, next_pc);
     switch(type) {
-    case CPSR_M_SVC:
-        //swi
-        PRINTF("SVC\r\n");
-        register_write(15, 0x8|(cp15_ctl_v?0xffff0000:0));
-        cpsr_i_set(1);  //disable irq
-        cpsr_t_set(0);  //arm mode
-        cpsr &= ~0x1f;
-        cpsr |= CPSR_M_SVC;
-        spsr[CPU_MODE_SVC] = cpsr_int;  //write SPSR_svc
-        register_write(14, next_pc);  //write R14_svc
-        break;
-    case CPSR_M_IRQ:
+    case INT_EXCEPTION_IRQ:
         //irq
         if(cpsr_i) {
             return;  //irq disable
@@ -596,6 +685,35 @@ void interrupt_exception(uint8_t type)
         cpsr |= CPSR_M_IRQ;
         spsr[CPU_MODE_IRQ] = cpsr_int;  //write SPSR_irq
         register_write(14, next_pc + 4);  //write R14_irq
+        break;
+    case INT_EXCEPTION_PREABT:
+        //preAbt
+        PRINTF("PREABT\r\n");
+        register_write(15, 0xc|(cp15_ctl_v?0xffff0000:0));
+        cpsr &= ~0x1f;
+        cpsr |= CPSR_M_ABT;
+        spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
+        register_write(14, next_pc + 4);  //write R14_abt
+        break;
+    case INT_EXCEPTION_SWI:
+        //swi
+        PRINTF("SVC\r\n");
+        register_write(15, 0x8|(cp15_ctl_v?0xffff0000:0));
+        cpsr_i_set(1);  //disable irq
+        cpsr_t_set(0);  //arm mode
+        cpsr &= ~0x1f;
+        cpsr |= CPSR_M_SVC;
+        spsr[CPU_MODE_SVC] = cpsr_int;  //write SPSR_svc
+        register_write(14, next_pc);  //write R14_svc
+        break;
+    case INT_EXCEPTION_DATAABT:
+        //dataAbt
+        PRINTF("DATAABT\r\n");
+        register_write(15, 0x10|(cp15_ctl_v?0xffff0000:0));
+        cpsr &= ~0x1f;
+        cpsr |= CPSR_M_ABT;
+        spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
+        register_write(14, next_pc + 8);  //write R14_abt
         break;
     default:
         printf("unknow interrupt\r\n");
@@ -800,6 +918,10 @@ void decode(void)
                             PRINTF("ldrsb0 %sSB R%d, [R%d], %s[R%d] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
                         }
                     }
+                    if(!Lf) {
+                        printf("undefed LDRD\r\n");
+                        getchar();
+                    }
                     break;
                 case 3:
                     //code_is_ldrsh
@@ -818,6 +940,10 @@ void decode(void)
                         } else {
                             PRINTF("ldrsh0 %sSH R%d, [R%d], %s[R%d] %s\r\n", Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
                         }
+                    }
+                    if(!Lf) {
+                        printf("undefed STRD\r\n");
+                        getchar();
                     }
                     break;
                 default:
@@ -1107,7 +1233,7 @@ void execute(void)
         
         return;
     } else if(code_type == code_is_swi) {
-        interrupt_exception(CPSR_M_SVC);
+        interrupt_exception(INT_EXCEPTION_SWI);
         return;
     } else if(code_type == code_is_mrs) {
         shifter_flag = 0;  //no need to use shift
@@ -1389,6 +1515,14 @@ void execute(void)
             //first add
             address = aluout;  //aluout
         }
+        
+        uint32_t tmpcpsr = cpsr;
+        if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+            //LDRT as user mode
+            cpsr &= 0x1f;
+            cpsr |= CPSR_M_USR;
+        }
+        
         if(Lf) {
             //LDR
             if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
@@ -1454,9 +1588,9 @@ void execute(void)
             PRINTF("[LDR]write register R%d = 0x%x\r\n", Rn, aluout);
         }
         
-        if(!Pf && Wf) {
-            //printf("UNSUPPORT LDRT\r\n");
-            //getchar();
+        if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+            //LDRT restore cpsr
+            cpsr = tmpcpsr;
         }
         
     } else if(code_type == code_is_dp0 || code_type == code_is_dp1 ||  code_type == code_is_dp2) {
@@ -1735,16 +1869,37 @@ int main(int argc, char **argv)
     load_program_memory(dtb_path, MEM_SIZE - 0x4000);
     reset_proc();
     
-    register_write(1, 0xffffffff);
-    register_write(2, MEM_SIZE - 0x4000);
+    register_write(1, 0xffffffff);         //set r1
+    register_write(2, MEM_SIZE - 0x4000);  //set r2
     
     while(1) {
         fetch();
+        if(mmu_check_status()) {
+            //check fetch instruction_word fault
+            interrupt_exception(INT_EXCEPTION_PREABT);
+            mmu_fault = 0;
+#if 0
+            dump_ttb();
+#endif
+#if 0
+            printf("-------preAbt cp15_far %x-------\n", cp15_far);
+            exception_out();
+#endif
+            continue;
+        }
+        
         decode();
         execute();
-        
-        //per 10 millisecond timer irq test
-        if(TIM.EN && code_counter%kips_speed == 0) {
+        if(mmu_check_status()) {
+            //check memory data fault
+            interrupt_exception(INT_EXCEPTION_DATAABT);
+            mmu_fault = 0;
+#if 1
+            printf("-------code is %d, cp15_far %x------\n", code_type, cp15_far);
+            exception_out();
+#endif
+        } else if(TIM.EN && code_counter%kips_speed == 0) {
+            //per 10 millisecond timer irq test
             interrupt_happen(0);
         }
         
