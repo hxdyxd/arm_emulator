@@ -7,15 +7,15 @@
 
 
 static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr);
-
+void interrupt_exception(uint8_t type);
 
 /****************************************************/
 //Memary size
 
-#define CODE_SIZE   0x800000
+#define CODE_SIZE   0x2000000
 #define RAM_SIZE    0x0
 
-#define MEM_SIZE  0x800000  //8M
+#define MEM_SIZE  0x2000000  //16M
 /****************************************************/
 
 #define DEBUG                  0
@@ -193,6 +193,47 @@ static inline void exception_out(void)
     getchar();
 }
 
+/******************************interrupt**************************************/
+struct interrupt_register {
+    uint32_t MSK; //Determine which interrupt source is masked.
+    uint32_t PND; //Indicate the interrupt request status
+};
+
+struct interrupt_register INT;
+
+
+#define   int_reset()      do{\
+ INT.MSK = 0xFFFFFFFF;\
+ INT.PND = 0x00000000;\
+}while(0)
+
+static inline void interrupt_happen(int id)
+{
+    if(INT.MSK & (1 << id)) {
+        //masked
+        return;
+    }
+    INT.PND |= 1 << id;
+    interrupt_exception(CPSR_M_IRQ);
+}
+
+/******************************interrupt**************************************/
+
+/*******************************timer*****************************************/
+
+struct timer_register {
+    uint32_t CNT; //Determine which interrupt source is masked.
+    uint32_t EN; //Indicate the interrupt request status
+};
+
+struct timer_register TIM;
+
+#define   tim_reset()      do{\
+ TIM.CNT = 0x00000000;\
+ TIM.EN =  0x00000000;\
+}while(0)
+
+/*******************************timer*****************************************/
 
 
 #define  read_word(m,a)       read_mem(m,a,1)
@@ -205,7 +246,11 @@ static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
         address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 0); //read
     }
     
-    if(address == 0x4001f000) {
+    if(address == 0x4001f040) {
+        return INT.MSK;
+    } else if(address == 0x4001f044) {
+        return INT.PND;
+    } else if(address == 0x4001f000) {
         return 1;
     } else if(address == 0x4001f020) {
         //sys clock ms
@@ -231,9 +276,19 @@ static inline void write_word(uint8_t *mem, unsigned int address, unsigned int d
     int *data_p;
     address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 1); //write
     
-    if(address == 0x4001f030) {
+    if(address == 0x4001f040) {
+        INT.MSK = data;
+        return;
+    } else if(address == 0x4001f044) {
+        INT.PND = data;
+        return;
+    } else  if(address == 0x4001f030) {
         //ips
         code_counter = data;
+        return;
+    } else if(address == 0x4001f024) {
+        //timer
+        TIM.EN = data;
         return;
     }
     
@@ -363,6 +418,7 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
     if(first_level_descriptor == 0) {
         //Section translation fault
         printf("Section translation fault va = 0x%x\r\n", vaddr);
+        printf("PTE = 0x%x\r\n", page_table_entry);
         exception_out();
     } else if(first_level_descriptor == 2) {
         //section entry
@@ -1101,9 +1157,12 @@ void execute(void)
             printf("swp error \r\n");
             getchar();
         }
-        
+        /* op1, Rn
+         * op2, Rm
+         */
+        uint32_t tmp = read_word(MEM, operand1);
         write_word(MEM, operand1, operand2);
-        register_write(Rd, operand1);
+        register_write(Rd, tmp);
         
         return;
     } else {
@@ -1396,8 +1455,8 @@ void execute(void)
         }
         
         if(!Pf && Wf) {
-            printf("UNSUPPORT LDRT\r\n");
-            getchar();
+            //printf("UNSUPPORT LDRT\r\n");
+            //getchar();
         }
         
     } else if(code_type == code_is_dp0 || code_type == code_is_dp1 ||  code_type == code_is_dp2) {
@@ -1629,6 +1688,8 @@ void reset_proc(void)
     cpsr_i_set(1);  //disable irq
     cpsr_f_set(1);  //disable fiq
     cp15_reset();
+    int_reset();
+    tim_reset();
     for(i=0; i<16; i++) {
         register_write(i, 0);
     }
@@ -1668,7 +1729,7 @@ int main(int argc, char **argv)
     char *path = "./arm_linux/zImage";
     char *dtb_path = "./arm_linux/arm-emulator.dtb";
     
-    uint32_t kips_speed = 150000; //(uint32_t)speed_calibration(path);
+    uint32_t kips_speed = 150000; //per 10ms
     
     load_program_memory(path, 0);
     load_program_memory(dtb_path, MEM_SIZE - 0x4000);
@@ -1682,9 +1743,9 @@ int main(int argc, char **argv)
         decode();
         execute();
         
-        //per millisecond timer irq test
-        if(code_counter%kips_speed == 0) {
-            interrupt_exception(CPSR_M_IRQ);
+        //per 10 millisecond timer irq test
+        if(TIM.EN && code_counter%kips_speed == 0) {
+            interrupt_happen(0);
         }
         
 #if DEBUG
