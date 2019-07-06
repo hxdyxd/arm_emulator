@@ -261,9 +261,13 @@ struct timer_register TIM;
 
 #define  MMU_EXCEPTION_ADDR      0x4001f050
 
-#define  read_word(m,a)       read_mem(m,a,1)
+#define  read_word_without_mmu(a)       read_mem(a,0,3)
+#define  read_word(m,a)                 read_mem(a,1,3)
+#define  read_halfword(m,a)             (read_mem(a,1,1) & 0xffff)
+#define  read_byte(m,a)                 (read_mem(a,1,0) & 0xff)
 
-static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
+
+static inline uint32_t read_mem(uint32_t address, uint8_t mmu, uint8_t mask)
 {
     int *data;
     
@@ -288,12 +292,12 @@ static inline uint32_t read_mem(uint8_t *mem, uint32_t address, uint8_t mmu)
         return 0x00000012;
     }
     
-    if(address >= MEM_SIZE) {
+    if(address >= MEM_SIZE || address&mask) {
         printf("mem overflow error, read 0x%x\r\n", address);
         exception_out();
     }
     
-    data =  (int*) (mem + address);
+    data =  (int*) (MEM + address);
     return *data;
 }
 
@@ -469,7 +473,7 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
         
     }
     //section page table, store size 16KB
-    uint32_t page_table_entry = read_mem(MEM, (cp15_ttb&0xFFFFC000)|((vaddr&0xFFF00000) >> 18), 0);
+    uint32_t page_table_entry = read_word_without_mmu( (cp15_ttb&0xFFFFC000)|((vaddr&0xFFF00000) >> 18));
     uint8_t first_level_descriptor = page_table_entry&3;
     if(first_level_descriptor == 0) {
         //Section translation fault
@@ -515,13 +519,13 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
         //page table
         uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
         uint8_t domainval =  domain << 1;
-        domainval = (Register_cp15[3] >> domainval)&0x3;
+        domainval = (cp15_domain >> domainval)&0x3;
         if(first_level_descriptor == 1) {
             //coarse page table, store size 1KB
-            page_table_entry = read_mem(MEM, (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10), 0);
+            page_table_entry = read_word_without_mmu( (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10));
         } else if(first_level_descriptor == 3) {
             //fine page table, store size 4KB
-            page_table_entry = read_mem(MEM, (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8), 0);
+            page_table_entry = read_word_without_mmu( (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8));
         } else {
             printf("mmu fault\r\n");
             exception_out();
@@ -532,8 +536,8 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
             cp15_fsr = (domain << 4) | 0x7;
             cp15_far = vaddr;
             mmu_fault = 1;
-            PRINTF("Page translation fault va = 0x%x %d %d\r\n",
-             vaddr, privileged, wr);
+            PRINTF("Page translation fault va = 0x%x %d %d pte = 0x%x\r\n",
+             vaddr, privileged, wr, page_table_entry);
             //exception_out();
         } else {
             if(domainval == 0) {
@@ -659,9 +663,9 @@ uint32_t load_program_memory(char *file_name, uint32_t start)
         write_word(MEM, address, instruction);
         address = address + 4;
     }
-    printf("load mem start 0x%x, size 0x%x \r\n", start, address - start);
+    printf("load mem start 0x%x, size 0x%x \r\n", start, address - start - 4);
     fclose(fp);
-    return address - start;
+    return address - start - 4;
 }
 
 
@@ -690,10 +694,12 @@ void interrupt_exception(uint8_t type)
         //preAbt
         PRINTF("PREABT\r\n");
         register_write(15, 0xc|(cp15_ctl_v?0xffff0000:0));
+        cpsr_i_set(1);  //disable irq
+        cpsr_t_set(0);  //arm mode
         cpsr &= ~0x1f;
         cpsr |= CPSR_M_ABT;
         spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
-        register_write(14, next_pc + 4);  //write R14_abt
+        register_write(14, next_pc + 0);  //write R14_abt
         break;
     case INT_EXCEPTION_SWI:
         //swi
@@ -710,10 +716,12 @@ void interrupt_exception(uint8_t type)
         //dataAbt
         PRINTF("DATAABT\r\n");
         register_write(15, 0x10|(cp15_ctl_v?0xffff0000:0));
+        cpsr_i_set(1);  //disable irq
+        cpsr_t_set(0);  //arm mode
         cpsr &= ~0x1f;
         cpsr |= CPSR_M_ABT;
         spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
-        register_write(14, next_pc + 8);  //write R14_abt
+        register_write(14, next_pc + 4);  //write R14_abt
         break;
     default:
         printf("unknow interrupt\r\n");
@@ -730,8 +738,8 @@ void fetch(void)
         exception_out();
     }
     
-    instruction_word = read_mem(MEM, register_read(15) - 4, 1);
-    PRINTF("[0x%04x]: ", register_read(15) - 4);
+    instruction_word = read_word(MEM, pc);
+    PRINTF("[0x%04x]: ", pc);
     register_write(15, pc + 4 ); //current pc add 4
 }
 
@@ -1287,6 +1295,9 @@ void execute(void)
          * op2, Rm
          */
         uint32_t tmp = read_word(MEM, operand1);
+        if(mmu_check_status()) {
+            return;
+        }
         write_word(MEM, operand1, operand2);
         register_write(Rd, tmp);
         
@@ -1527,31 +1538,69 @@ void execute(void)
             //LDR
             if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
                 //Halfword
-                register_write(Rd, read_word(MEM, address) & 0xffff);
+                uint32_t data = read_halfword(MEM, address);
+                if(mmu_check_status()) {
+                    if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                        //LDRT restore cpsr
+                        cpsr = tmpcpsr;
+                    }
+                    return;
+                }
+                register_write(Rd, data);
             } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
                 //Halfword Signed
-                uint32_t data = read_word(MEM, address) & 0xffff;
+                uint32_t data = read_halfword(MEM, address);
+                if(mmu_check_status()) {
+                    if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                        //LDRT restore cpsr
+                        cpsr = tmpcpsr;
+                    }
+                    return;
+                }
                 if(data&0x8000) {
                     data |= 0xffff0000;
                 }
                 register_write(Rd, data);
             } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
                 //Byte Signed
-                uint32_t data = read_word(MEM, address) & 0xff;
+                uint32_t data = read_byte(MEM, address);
+                if(mmu_check_status()) {
+                    if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                        //LDRT restore cpsr
+                        cpsr = tmpcpsr;
+                    }
+                    return;
+                }
                 if(data&0x80) {
                     data |= 0xffffff00;
                 }
                 register_write(Rd, data);
             } else if(Bf) {
                 //Byte
-                register_write(Rd, read_word(MEM, address) & 0xff);
+                uint32_t data = read_byte(MEM, address);
+                if(mmu_check_status()) {
+                    if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                        //LDRT restore cpsr
+                        cpsr = tmpcpsr;
+                    }
+                    return;
+                }
+                register_write(Rd, data);
             } else {
                 //Word
                 if((address&0x3) != 0) {
                     printf("ldr unsupported address = 0x%x\n", address);
                     getchar();
                 }
-                register_write(Rd, read_word(MEM, address));
+                uint32_t data = read_word(MEM, address);
+                if(mmu_check_status()) {
+                    if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                        //LDRT restore cpsr
+                        cpsr = tmpcpsr;
+                    }
+                    return;
+                }
+                register_write(Rd, data);
             }
             PRINTF("load data [0x%x]:0x%x to R%d \r\n", address, register_read(Rd), Rd);
         } else {
@@ -1560,6 +1609,13 @@ void execute(void)
                 //Halfword
                 write_halfword(MEM, address, register_read(Rd) & 0xffff);
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  register_read(Rd) & 0xffff, address);
+                if(mmu_check_status()) {
+                    if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                        //LDRT restore cpsr
+                        cpsr = tmpcpsr;
+                    }
+                    return;
+                }
             } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
                 //Halfword Signed ?
                 uint16_t data = register_read(Rd) & 0xffff;
@@ -1577,9 +1633,23 @@ void execute(void)
             } else if(Bf) {
                 write_byte(MEM, address, register_read(Rd) & 0xff);
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd,  register_read(Rd) & 0xff, address);
+                if(mmu_check_status()) {
+                    if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                        //LDRT restore cpsr
+                        cpsr = tmpcpsr;
+                    }
+                    return;
+                }
             } else {
                 write_word(MEM, address, register_read(Rd));
                 PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd, register_read(Rd), address);
+                if(mmu_check_status()) {
+                    if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                        //LDRT restore cpsr
+                        cpsr = tmpcpsr;
+                    }
+                    return;
+                }
             }
         }
         if(!(!Wf && Pf)) {
@@ -1665,6 +1735,9 @@ void execute(void)
                         else address -= 4;
                     }
                     uint32_t data = read_word(MEM, address);
+                    if(mmu_check_status()) {
+                        return;
+                    }
                     if(n == 15) {
                         data &= 0xfffffffc;
                         if(Bit22) {
@@ -1679,7 +1752,7 @@ void execute(void)
                         register_write(n, data);
                     }
                     
-                    PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, read_word(MEM, address), n);
+                    PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, data, n);
                     if(!Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
@@ -1723,6 +1796,10 @@ void execute(void)
                     }
                     
                     PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", n, register_read(n), address);
+                    if(mmu_check_status()) {
+                        return;
+                    }
+                    
                     if(!Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
@@ -1863,9 +1940,11 @@ int main(int argc, char **argv)
     char *path = "./arm_linux/zImage";
     char *dtb_path = "./arm_linux/arm-emulator.dtb";
     
+    
     uint32_t kips_speed = 150000; //per 10ms
     
     load_program_memory(path, 0);
+    load_program_memory("./arm_linux/rootfs.ext2", MEM_SIZE - 0x4000 - 0x800000);
     load_program_memory(dtb_path, MEM_SIZE - 0x4000);
     reset_proc();
     
@@ -1873,6 +1952,14 @@ int main(int argc, char **argv)
     register_write(2, MEM_SIZE - 0x4000);  //set r2
     
     while(1) {
+#if 0
+        uint32_t pc = register_read(15) - 4;
+        if(pc <= 0x10250 &&  pc >= 0x10210  &&  cp15_ctl_m) {
+            abort_test = 1;
+            printf("pc = 0x%x, debug\n", pc);
+        }
+#endif
+        
         fetch();
         if(mmu_check_status()) {
             //check fetch instruction_word fault
@@ -1894,7 +1981,7 @@ int main(int argc, char **argv)
             //check memory data fault
             interrupt_exception(INT_EXCEPTION_DATAABT);
             mmu_fault = 0;
-#if 1
+#if 0
             printf("-------code is %d, cp15_far %x------\n", code_type, cp15_far);
             exception_out();
 #endif
@@ -1912,7 +1999,7 @@ int main(int argc, char **argv)
 #if 0
         if(abort_test) {
             exception_out();
-            //abort_test = 0;
+            abort_test = 0;
         }
 #endif
         code_counter++;
