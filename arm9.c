@@ -4,7 +4,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
-
+#include <conio.h>
 
 static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr);
 void interrupt_exception(uint8_t type);
@@ -259,6 +259,156 @@ struct timer_register TIM;
 
 /*******************************timer*****************************************/
 
+/*******************************uart*****************************************/
+
+struct uart_register {
+    uint32_t DLL; //Divisor Latch Low, 1
+    uint32_t DLH; //Divisor Latch High, 2
+    uint32_t IER; //Interrupt Enable Register, 1
+    uint32_t IIR; //Interrupt Identity Register, 2
+    uint32_t FCR; //FIFO¿ØÖÆ¼Ä´æÆ÷, 2
+    uint32_t LCR; //Line Control Register, 3
+    uint32_t MCR; //Modem Control Register, 4
+    uint32_t LSR; //Line Status Register, 5
+    uint32_t MSR; //Modem Status Registe, 6
+    uint32_t SCR;
+    uint32_t RBR;
+};
+
+struct uart_register UART[1];
+
+void uart_8250_reset(void) 
+{
+    memset(UART, 0, sizeof(UART));
+    UART[0].IIR = 0x01;
+    UART[0].LSR = 0x60;
+}
+
+#define UART_LCR_DLAB(uart)   ((uart)->LCR & 0x80)
+#define  register_set(r,b,v)  do{ if(v) {r |= 1 << (b);} else {r &= ~(1 << (b));} }while(0)
+
+uint8_t uart_8250_read(struct uart_register *uart, uint8_t address)
+{
+    PRINTF("uart read 0x%x\n", address);
+    switch(address) {
+    case 0x0:
+        if(UART_LCR_DLAB(uart)) {
+            //Divisor Latch Low
+            return uart->DLL;
+        } else {
+            //Receive Buffer Register
+            register_set(UART[0].LSR, 0, 0);
+            if( kbhit() )
+                uart->RBR = getch();
+            return uart->RBR;
+        }
+        break;
+    case 0x4:
+        if(UART_LCR_DLAB(uart)) {
+            //Divisor Latch High
+            return uart->DLH;
+        } else {
+            //Interrupt Enable Register 
+            return uart->IER;
+        }
+        break;
+    case 0x8:
+        //Interrupt Identity Register
+        return uart->IIR;
+    case 0xc:
+        //Line Control Register
+        return uart->LCR;
+    case 0x10:
+        //Modem Control Register
+        return uart->MCR;
+    case 0x14:
+        //Line Status Register, read-only
+        return uart->LSR;
+    case 0x18:
+        //Modem Status Registe, read-only
+        return uart->MSR;
+    case 0x1c:
+        //Scratchpad Register
+        return uart->SCR;
+    default:
+        PRINTF("uart read %x\n", address);
+    }
+    return 0;
+}
+
+void uart_8250_write(struct uart_register *uart, uint8_t address, uint8_t data)
+{
+    PRINTF("uart write 0x%x 0x%x\n", address, data);
+    switch(address) {
+    case 0x0:
+        if(UART_LCR_DLAB(uart)) {
+            //Divisor Latch Low
+            uart->DLL = data;
+        } else {
+            //Transmit Holding Register
+            putchar(data);
+        }
+        break;
+    case 0x4:
+        if(UART_LCR_DLAB(uart)) {
+            //Divisor Latch High
+            uart->DLH = data;
+        } else {
+            //Interrupt Enable Register 
+            uart->IER = data;
+        }
+        break;
+    case 0x8:
+        //FIFO Control Register
+        uart->FCR = data;
+        break;
+    case 0xc:
+        //Line Control Register
+        uart->LCR = data;
+        break;
+    case 0x10:{
+        //Modem Control Register
+        uint8_t lastmcr = uart->MCR;
+        uart->MCR = data;
+        if( (uart->MCR&1) ^ (lastmcr&1) ) {
+            //set DSR
+            uart->MSR |=  (1<<1);
+        }
+        if( (uart->MCR&0x10) ) {
+            //Loopback
+            register_set(uart->MSR, 7, (uart->MCR&0x8) ); //¸¨ÖúÊä³ö2
+            register_set(uart->MSR, 6, (uart->MCR&0x4) ); //¸¨ÖúÊä³ö1
+            register_set(uart->MSR, 5, (uart->MCR&0x1) ); //¸¨ÖúDTR
+            register_set(uart->MSR, 4, (uart->MCR&0x2) ); //¸¨ÖúRTS
+            
+            register_set(uart->MSR, 3, (uart->MCR&0x8) ); //¸¨ÖúÊä³ö2
+            register_set(uart->MSR, 2, (uart->MCR&0x4) ); //¸¨ÖúÊä³ö1
+            register_set(uart->MSR, 1, (uart->MCR&0x1) ); //¸¨ÖúDTR
+            register_set(uart->MSR, 0, (uart->MCR&0x2) ); //¸¨ÖúRTS
+            //printf("Loopback msr = 0x%x\n", uart->MSR);
+        } else {
+            uart->MSR = 0;
+            register_set(uart->MSR, 5, 1);  //DSR×¼±¸¾ÍÐ÷
+            register_set(uart->MSR, 4, 1);  //CTSÓÐÐ§
+        }
+        
+        break;
+    }
+    case 0x14:
+    case 0x18:
+        break;
+    case 0x1c:
+        //uart->SCR = data;
+        break;
+    default:
+        PRINTF("uart write %x\n", address);
+    }
+}
+
+
+
+/*******************************uart*****************************************/
+
 #define  MMU_EXCEPTION_ADDR      0x4001f050
 
 #define  read_word_without_mmu(a)       read_mem(a,0,3)
@@ -290,6 +440,9 @@ static inline uint32_t read_mem(uint32_t address, uint8_t mmu, uint8_t mask)
         return code_counter;
     } else if(address == MMU_EXCEPTION_ADDR) {
         return 0x00000012;
+    } else if( (address&0xfffffc00) == 0x40020000) {
+        //uart
+        return uart_8250_read(&UART[0], (uint8_t)address);
     }
     
     if(address >= MEM_SIZE || address&mask) {
@@ -323,6 +476,10 @@ static inline void write_word(uint8_t *mem, unsigned int address, unsigned int d
         return;
     } else if(address == MMU_EXCEPTION_ADDR) {
         return;
+    } else if( (address&0xfffffc00) == 0x40020000) {
+        //uart
+        uart_8250_write(&UART[0], (uint8_t)address, (uint8_t)data);
+        return;
     }
     
     if(address >= MEM_SIZE || (address&3) != 0) {
@@ -341,6 +498,10 @@ static inline void write_halfword(uint8_t *mem, unsigned int address, unsigned s
     address = mmu_transfer(address, cpsr_m != CPSR_M_USR, 1); //write
     
     if(address == MMU_EXCEPTION_ADDR) {
+        return;
+    } else if( (address&0xfffffc00) == 0x40020000) {
+        //uart
+        uart_8250_write(&UART[0], (uint8_t)address, (uint8_t)data);
         return;
     }
     
@@ -366,6 +527,10 @@ static inline void write_byte(uint8_t *mem, unsigned int address, unsigned char 
         putchar(data);
         return;
     } else if(address == MMU_EXCEPTION_ADDR) {
+        return;
+    } else if( (address&0xfffffc00) == 0x40020000) {
+        //uart
+        uart_8250_write(&UART[0], (uint8_t)address, (uint8_t)data);
         return;
     }
     
@@ -667,7 +832,6 @@ uint32_t load_program_memory(char *file_name, uint32_t start)
     fclose(fp);
     return address - start - 4;
 }
-
 
 
 void interrupt_exception(uint8_t type)
@@ -1077,6 +1241,9 @@ void decode(void)
     }
 }
 
+
+static uint8_t swi_flag = 0;
+
 void execute(void)
 {
     unsigned int operand1 = register_read(Rn);
@@ -1241,7 +1408,7 @@ void execute(void)
         
         return;
     } else if(code_type == code_is_swi) {
-        interrupt_exception(INT_EXCEPTION_SWI);
+        swi_flag = 1;
         return;
     } else if(code_type == code_is_mrs) {
         shifter_flag = 0;  //no need to use shift
@@ -1901,6 +2068,7 @@ void reset_proc(void)
     cp15_reset();
     int_reset();
     tim_reset();
+    uart_8250_reset();
     for(i=0; i<16; i++) {
         register_write(i, 0);
     }
@@ -1977,7 +2145,42 @@ int main(int argc, char **argv)
         
         decode();
         execute();
-        if(mmu_check_status()) {
+        
+        if(swi_flag) {
+            swi_flag = 0;
+            
+            uint32_t call_number = register_read(7);
+            //printf(" swi r7 = %d\n", call_number);
+            
+            if(call_number == 162) {
+                //printf("sleep(%d)\n", read_word(MEM, register_read(0)) );
+            } else if(call_number == 146) {
+                
+//                for(int j=0;j<register_read(2);j++) {
+//                    uint32_t iovecptr1 = read_word(MEM, register_read(1) + j*8);
+//                    uint32_t iovecptr2 = read_word(MEM, register_read(1) + j*8 + 4);
+//                    printf("---------[");
+//                    for(int i=0;i<iovecptr2;i++) {
+//                        putchar(read_byte(MEM, iovecptr1 + i));
+//                    }
+//                    printf("]---------\n");
+//                    //printf("\nwritev %d [0x%x] %d\n", register_read(0), iovecptr1, iovecptr2);
+//                }
+
+            } else if(call_number == 4) {
+//                uint32_t ptr1 = register_read(1);
+//                uint32_t r2len = read_word(MEM, register_read(2) );
+//                
+//                for(int i=0;i<r2len;i++) {
+//                    putchar(read_byte(MEM, ptr1 + i));
+//                }
+//                
+//                printf("write %d\n", r2len);
+            }
+            
+            
+            interrupt_exception(INT_EXCEPTION_SWI);
+        } else if(mmu_check_status()) {
             //check memory data fault
             interrupt_exception(INT_EXCEPTION_DATAABT);
             mmu_fault = 0;
@@ -1988,6 +2191,25 @@ int main(int argc, char **argv)
         } else if(TIM.EN && code_counter%kips_speed == 0) {
             //per 10 millisecond timer irq test
             interrupt_happen(0);
+        } else if( (UART[0].IER&0xf) && !cpsr_i ) {
+            //UART
+            if( (UART[0].IER&0x2) && CPSR_M_IRQ != (cpsr&0x1f) /*(UART[0].IIR&1)*/ ) {
+                //Bit1,ÔÊEnable Transmit Holding Register Empty Interrupt. 
+                interrupt_happen(1);
+                if( CPSR_M_IRQ == (cpsr&0x1f) ) {
+                    UART[0].IIR = 0x2; // THR empty
+                    //printf(".");
+                }
+            } else  if( code_counter%(150243) == 0 && (UART[0].IER&0x1) && CPSR_M_IRQ != (cpsr&0x1f) &&  kbhit() ) {
+                 //Bit0:Enable Received Data Available Interrupt. 
+                interrupt_happen(1);
+                if( CPSR_M_IRQ == (cpsr&0x1f) ) {
+                    UART[0].IIR = 0x4; //received data available
+                    register_set(UART[0].LSR, 0, 1);
+                }
+            } else {
+                UART[0].IIR = 1; //no interrupt pending
+            }
         }
         
 #if DEBUG
