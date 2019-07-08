@@ -2191,22 +2191,17 @@ int main(int argc, char **argv)
         } else if(TIM.EN && code_counter%kips_speed == 0) {
             //per 10 millisecond timer irq test
             interrupt_happen(0);
-        } else if( (UART[0].IER&0xf) && !cpsr_i ) {
+        } else if( (UART[0].IER&0xf) && !cpsr_i && CPSR_M_IRQ != (cpsr&0x1f) ) {
             //UART
-            if( (UART[0].IER&0x2) && CPSR_M_IRQ != (cpsr&0x1f) /*(UART[0].IIR&1)*/ ) {
+            if( (UART[0].IER&0x2) ) {
                 //Bit1,‘ Enable Transmit Holding Register Empty Interrupt. 
                 interrupt_happen(1);
-                if( CPSR_M_IRQ == (cpsr&0x1f) ) {
-                    UART[0].IIR = 0x2; // THR empty
-                    //printf(".");
-                }
-            } else  if( code_counter%(150243) == 0 && (UART[0].IER&0x1) && CPSR_M_IRQ != (cpsr&0x1f) &&  kbhit() ) {
+                UART[0].IIR = 0x2; // THR empty
+            } else  if( code_counter%kips_speed == kips_speed/2  && (UART[0].IER&0x1) && kbhit() ) {
                  //Bit0:Enable Received Data Available Interrupt. 
                 interrupt_happen(1);
-                if( CPSR_M_IRQ == (cpsr&0x1f) ) {
-                    UART[0].IIR = 0x4; //received data available
-                    register_set(UART[0].LSR, 0, 1);
-                }
+                UART[0].IIR = 0x4; //received data available
+                register_set(UART[0].LSR, 0, 1);
             } else {
                 UART[0].IIR = 1; //no interrupt pending
             }
