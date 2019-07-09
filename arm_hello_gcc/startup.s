@@ -37,12 +37,11 @@ Reset_Handler:
     msr cpsr_c, #0xd3   @进入SVC模式
     ldr sp, =stack_top  @设置栈指针R13_svc
     sub sp, sp, #80
-    msr cpsr_c, #0xd0   @进入USER模式
+    msr cpsr_c, #0x50   @进入USER模式
     ldr sp, =stack_top  @设置栈指针R13
     sub sp, sp, #80
     sub sp, sp, #80
     bl reset
-    msr cpsr_c, #0x50   @进入USER模式,开中断
     swi 0xcaf4
     bl main
     b .

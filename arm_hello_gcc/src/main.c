@@ -5,20 +5,23 @@
 #include <math.h>
 #include <function_task.h>
 
-
+#define CONFIG_MS    (10)
 //uart
-#define SERIAL_FLAG *(volatile unsigned char *) (0x1f000)
-#define SERIAL_OUT *(volatile unsigned char *) (0x1f004)
-#define SERIAL_IN *(volatile unsigned char *) (0x1f008)
+#define SERIAL_THR   *(volatile unsigned char *) (0x40020000)
 
-#define CODE_COUNTER *(volatile unsigned int *) (0x1f030)
+#define INT_MSK   *(volatile unsigned int *) (0x4001f040)
+#define INT_PND   *(volatile unsigned int *) (0x4001f044)
+
+#define TIM_CNT   *(volatile unsigned int *) (0x4001f020)
+#define TIM_ENA   *(volatile unsigned int *) (0x4001f024)
+
+#define CODE_COUNTER *(volatile unsigned int *) (0x4001f030)
 
 
 /* implementation of putchar (also used by printf function to output data)    */
 int uart_sendchar(char ch)                 /* Write character to Serial Port    */
 {
-    while (SERIAL_FLAG & 0x01);
-    return (SERIAL_OUT = ch);
+    return (SERIAL_THR = ch);
 }
 
 int _write( int file, char *ptr, int len)
@@ -37,7 +40,14 @@ volatile uint32_t cnt_counter = 0;
 
 void handle_irq(void)
 {
-    cnt_counter++;
+    if( INT_PND & (1<<0) ) {
+        cnt_counter += CONFIG_MS;
+        INT_PND &= ~(1<<0);
+    }
+    if( INT_PND & (1<<1) ) {
+        putchar(SERIAL_THR);
+        INT_PND &= ~(1<<1);
+    }
     //putchar('i');
 }
 
@@ -136,6 +146,10 @@ int main(void)
     float_test();
     sin_test();
     pi_test();
+
+    INT_PND = 0;
+    INT_MSK &= ~(3<<0); //enable timer interrupt
+    TIM_ENA = 1;
 
     while(1) {
         TIMER_TASK(timer1, 2000, 1) {

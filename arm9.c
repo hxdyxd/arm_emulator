@@ -238,7 +238,7 @@ struct interrupt_register INT;
 
 static inline int interrupt_happen(int id)
 {
-    if(  int_is_set(INT.MSK, id) || int_is_set(INT.PND, id) ) {
+    if( int_is_set(INT.MSK, id) || int_is_set(INT.PND, id) ) {
         //masked or not cleared
         return 0;
     }
@@ -453,6 +453,9 @@ static inline uint32_t read_mem(uint8_t privileged, uint32_t address, uint8_t mm
         } else if(address == 0x4001f020) {
             //sys clock ms
             return GET_TICK();
+        } else if(address == 0x4001f024) {
+            //timer
+            return TIM.EN;
         } else if(address == 0x4001f030) {
             //code counter
             return code_counter;
@@ -2018,8 +2021,7 @@ int main(int argc, char **argv)
     char *path = "./arm_linux/zImage";
     char *dtb_path = "./arm_linux/arm-emulator.dtb";
     
-    
-    uint32_t kips_speed = 30000; //per 100ms
+    uint32_t kips_speed = 40000; //per 10ms
     
     load_program_memory(path, 0);
     load_program_memory(dtb_path, MEM_SIZE - 0x4000);
@@ -2029,6 +2031,7 @@ int main(int argc, char **argv)
     register_write(2, MEM_SIZE - 0x4000);  //set r2
     
     while(1) {
+        code_counter++;
 #if 0
         uint32_t pc = register_read(15) - 4;
         if(pc <= 0x10250 &&  pc >= 0x10210  &&  cp15_ctl_m) {
@@ -2080,7 +2083,7 @@ int main(int argc, char **argv)
             //per 100 millisecond timer irq
             static uint32_t tick_timer = 0;
             uint32_t new_tick_timer = GET_TICK();
-            if(new_tick_timer - tick_timer >= 100) {
+            if(new_tick_timer - tick_timer >= 10) {
                 tick_timer = new_tick_timer;
                 interrupt_happen(0);
             }
@@ -2116,7 +2119,6 @@ int main(int argc, char **argv)
             abort_test = 0;
         }
 #endif
-        code_counter++;
     }
     
     printf("\r\n---------------test code -----------\r\n");
