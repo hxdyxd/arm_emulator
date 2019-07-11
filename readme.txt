@@ -1,2 +1,3 @@
 simple arm9 emulator with freertos and linux support and only two thousand lines, other code at
 https://github.com/hxdyxd/arm-emulator-linux
+https://github.com/hxdyxd/arm_emulator_linux_bin
