@@ -31,7 +31,7 @@ uint8_t abort_test = 0;
 #define  IS_SET(v, bit) ( ((v)>>(bit))&1 )
 
 
-unsigned int spsr[7] = {0, };
+uint32_t spsr[7] = {0, };
 #define  cpsr    spsr[0]
 
 
@@ -69,7 +69,7 @@ unsigned int spsr[7] = {0, };
 static uint8_t MEM[MEM_SIZE];
 
 //intermediate datapath and control path signals
-static unsigned int instruction_word;
+static uint32_t instruction_word;
 
 const char *opcode_table[16] = {
     "AND", "EOR", "SUB", "RSB", 
@@ -88,7 +88,7 @@ const char *shift_table[4] = {
 uint32_t code_counter = 0;
 
 //register function
-unsigned int Register[7][16];
+uint32_t Register[7][16];
 #define   CPU_MODE_USER      0
 #define   CPU_MODE_FIQ       1
 #define   CPU_MODE_IRQ       2
@@ -236,7 +236,7 @@ struct interrupt_register INT;
 
 #define  int_is_set(v, bit) ( ((v)>>(bit))&1 )
 
-static inline int interrupt_happen(int id)
+static inline uint32_t interrupt_happen(uint32_t id)
 {
     if( int_is_set(INT.MSK, id) || int_is_set(INT.PND, id) ) {
         //masked or not cleared
@@ -483,7 +483,7 @@ static inline uint32_t read_mem(uint8_t privileged, uint32_t address, uint8_t mm
 #define  write_halfword_mode(m,a,d)     write_mem(m,a,(d)&0xffff,1)
 #define  write_byte_mode(m,a,d)         write_mem(m,a,(d)&0xff,0)
 
-static inline void write_mem(uint8_t privileged, unsigned int address, unsigned int data,  uint8_t mask)
+static inline void write_mem(uint8_t privileged, uint32_t address, uint32_t data,  uint8_t mask)
 {
     if(address&mask) {
         //Check address alignment
@@ -1297,9 +1297,9 @@ static uint8_t swi_flag = 0;
 
 void execute(void)
 {
-    unsigned int operand1 = register_read(Rn);
-    unsigned int operand2 = register_read(Rm);
-    unsigned int rot_num = register_read(Rs);
+    uint32_t operand1 = register_read(Rn);
+    uint32_t operand2 = register_read(Rm);
+    uint32_t rot_num = register_read(Rs);
     unsigned char add_flag = 1;
     /*
      * 0: turn off shifter
@@ -1308,7 +1308,7 @@ void execute(void)
      * 5: DP(i) On
     */
     unsigned char shifter_flag = 0;
-    unsigned int carry = 0;
+    uint32_t carry = 0;
     
     if(code_type == code_is_dp2) {
         //immediate
