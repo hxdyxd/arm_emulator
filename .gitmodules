@@ -1,0 +1,3 @@
+[submodule "arm_linux"]
+	path = arm_linux
+	url = https://github.com/hxdyxd/arm_emulator_linux_bin
