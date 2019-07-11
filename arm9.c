@@ -2,6 +2,7 @@
 /* By hxdyxd */
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <conio.h>
@@ -2022,6 +2023,10 @@ int main(int argc, char **argv)
     char *dtb_path = "./arm_linux/arm-emulator.dtb";
     
     uint32_t kips_speed = 40000; //per 10ms
+    if(argc > 1) {
+        kips_speed = atoi(argv[1]);
+    }
+    printf("KIPS_SPEED = %d\n", kips_speed);
     
     load_program_memory(path, 0);
     load_program_memory(dtb_path, MEM_SIZE - 0x4000);
