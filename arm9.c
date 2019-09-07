@@ -143,16 +143,8 @@ uint8_t get_cpu_mode_code(void)
     return cpu_mode;
 }
 
-static inline uint32_t register_read_user_mode(uint8_t id)
-{
-    return Register[0][id];
-}
-
-static inline void register_write_user_mode(uint8_t id, uint32_t val)
-{
-    Register[0][id] = val;
-}
-
+#define register_read_user_mode(id)  Register[0][id]
+#define register_write_user_mode(id,v)  Register[0][id] = v
 
 static inline uint32_t register_read(uint8_t id)
 {
@@ -527,15 +519,25 @@ static inline void write_mem(uint8_t privileged, uint32_t address, uint32_t data
         exception_out();
     }
     
-    if(mask == 3) {
-        int *data_p = (int *) (MEM + address);
-        *data_p = data;
-    } else if(mask == 1) {
-        short *data_p = (short *) (MEM + address);
-        *data_p = data;
-    } else {
-        char * data_p = (char *) (MEM + address);
-        *data_p = data;
+    switch(mask) {
+    case 3:
+        {    
+            int *data_p = (int *) (MEM + address);
+            *data_p = data;
+        }
+        break;
+    case 1:
+        {
+            short *data_p = (short *) (MEM + address);
+            *data_p = data;
+        }
+        break;
+    default:
+        {
+            char * data_p = (char *) (MEM + address);
+            *data_p = data;
+        }
+        break;
     }
 }
 /*  memory */
