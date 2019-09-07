@@ -581,10 +581,7 @@ uint8_t mmu_fault = 0;
 /*
  *  return 1, mmu exception
  */
-static inline uint8_t mmu_check_status(void)
-{
-    return mmu_fault;
-}
+#define mmu_check_status()   mmu_fault
 
 
 /*
@@ -595,11 +592,11 @@ static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, u
 {
     switch(ap) {
     case 0:
-        if(!cp15_ctl_s && cp15_ctl_r && !wr)
+        if(!cp15_ctl_s & cp15_ctl_r & !wr)
             return 0;
-        if(cp15_ctl_s && !cp15_ctl_r && !wr && privileged)
+        if(cp15_ctl_s & !cp15_ctl_r & !wr & privileged)
             return 0;
-        if(cp15_ctl_s && cp15_ctl_r) {
+        if(cp15_ctl_s & cp15_ctl_r) {
             printf("mmu_check_access_permissions fault\r\n");
             exception_out();
         }
@@ -609,7 +606,7 @@ static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, u
             return 0;
         break;
     case 2:
-        if(privileged || !wr)
+        if(privileged | !wr)
             return 0;
         break;
     case 3:
@@ -1313,160 +1310,190 @@ void execute(void)
     unsigned char shifter_flag = 0;
     uint32_t carry = 0;
     
-    if(code_type == code_is_dp2) {
+    switch(code_type) {
+    case code_is_dp2:
         //immediate
         operand2 = immediate;
         rot_num = rotate_imm<<1;
         shift = 3;  //use ROR Only
         shifter_flag = 5;  //DP(i) On
-    } else if(code_type == code_is_b) {
+        break;
+    case code_is_b:
         operand1 = b_offset;
         operand2 = register_read(15);
         rot_num = 0;
         shifter_flag = 0;  //no need to use shift
-    } else if(code_type == code_is_ldr0 || code_type == code_is_ldrh1 || code_type == code_is_ldrsb1 || code_type == code_is_ldrsh1) {
+        break;
+    case code_is_ldr0:
+    case code_is_ldrh1:
+    case code_is_ldrsb1:
+    case code_is_ldrsh1:
         operand2 = immediate;
         //no need to use shift
         shifter_flag = 0;
-    } else if(code_type == code_is_dp0 || code_type == code_is_ldr1) {
+        break;
+    case code_is_dp0:
+    case code_is_ldr1:
         //immediate shift
         rot_num = shift_amount;
         shifter_flag = 3;  //PD(is) On
-    } else if(code_type == code_is_ldrsb0 || code_type == code_is_ldrsh0 || code_type == code_is_ldrh0) {
+        break;
+    case code_is_ldrsb0:
+    case code_is_ldrsh0:
+    case code_is_ldrh0:
         //no need to use shift
         shifter_flag = 0;
-    } else if(code_type == code_is_msr1) {
+        break;
+    case code_is_msr1:
         operand1 = 0;  //msr don't support
         operand2 = immediate;
         rot_num = rotate_imm<<1;
         shift = 3;
         shifter_flag = 5;  //DP(i) On
-    } else if(code_type == code_is_msr0) {
+        break;
+    case code_is_msr0:
         operand1 = 0;  //msr don't support
         //no need to use shift
         shifter_flag = 0;
-    } else if(code_type == code_is_dp1) {
+        break;
+    case code_is_dp1:
         //register shift
         //No need to use
         shifter_flag = 4;  //DP(rs) On
-    } else if(code_type == code_is_bx) {
+        break;
+    case code_is_bx:
         operand1 = 0;
         rot_num = 0;
         //no need to use shift
         shifter_flag = 0;
-    } else if(code_type == code_is_ldm) {
+        break;
+    case code_is_ldm:
         operand2 = 0;  //increase After
         rot_num = 0;
         shifter_flag = 0;  //no need to use shift
-    } else if(code_type == code_is_mult) {
+        break;
+    case code_is_mult:
         operand2 = operand2 * rot_num;
         shifter_flag = 0;  //no need to use shift
-    } else if(code_type == code_is_multl) {
-        uint64_t multl_long = 0;
-        uint8_t negative = 0;
-        if(Bit22) {
-            //Signed
-            if(IS_SET(operand2, 31)) {
-                operand2 = ~operand2 + 1;
-                negative++;
+        break;
+    case code_is_multl:
+        do{
+            uint64_t multl_long = 0;
+            uint8_t negative = 0;
+            if(Bit22) {
+                //Signed
+                if(IS_SET(operand2, 31)) {
+                    operand2 = ~operand2 + 1;
+                    negative++;
+                }
+                
+                if(IS_SET(rot_num, 31)) {
+                    rot_num = ~rot_num + 1;
+                    negative++;
+                }
             }
             
-            if(IS_SET(rot_num, 31)) {
-                rot_num = ~rot_num + 1;
-                negative++;
+            multl_long = (uint64_t)operand2 * rot_num;
+            if( negative == 1 ) {
+                //Set negative sign
+                multl_long = ~(multl_long - 1);
             }
-        }
-        
-        multl_long = (uint64_t)operand2 * rot_num;
-        if( negative == 1 ) {
-            //Set negative sign
-            multl_long = ~(multl_long - 1);
-        }
-        
-        if(opcode&1) {
-            multl_long += ( ((uint64_t)register_read(Rn) << 32) | register_read(Rd));
-        }
-        
-        register_write(Rn, multl_long >> 32);
-        register_write(Rd, multl_long&0xffffffff);
-        PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n", register_read(Rn), Rn, register_read(Rd), Rd, operand2, rot_num);
-        
-        if(Bit20) {
-            //Update CPSR register
-            uint8_t out_sign = IS_SET(multl_long, 63);
             
-            cpsr_n_set(out_sign);
-            cpsr_z_set(multl_long == 0);
-            //cv unaffected
-            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
-        }
-        
-        return;
-    } else if(code_type == code_is_swi) {
+            if(opcode&1) {
+                multl_long += ( ((uint64_t)register_read(Rn) << 32) | register_read(Rd));
+            }
+            
+            register_write(Rn, multl_long >> 32);
+            register_write(Rd, multl_long&0xffffffff);
+            PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n", register_read(Rn), Rn, register_read(Rd), Rd, operand2, rot_num);
+            
+            if(Bit20) {
+                //Update CPSR register
+                uint8_t out_sign = IS_SET(multl_long, 63);
+                
+                cpsr_n_set(out_sign);
+                cpsr_z_set(multl_long == 0);
+                //cv unaffected
+                PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+            }
+            
+            return;
+        }while(0);
+        break;
+    case code_is_swi:
         swi_flag = 1;
         return;
-    } else if(code_type == code_is_mrs) {
+        break;
+    case code_is_mrs:
         shifter_flag = 0;  //no need to use shift
-    } else if(code_type == code_is_mcr) {
-        shifter_flag = 0;  //no need to use shift
-        uint8_t op2 = (instruction_word >> 5)&0x7;
-        //  cp_num       Rs
-        //  register     Rd
-        //  cp_register  Rn
-        if(Bit20) {
-            //mrc
-            if(Rs == 15) {
-                uint32_t cp15_val;
-                if(Rn) {
-                    cp15_val = cp15_read(Rn);
-                } else {
-                    //register 0
-                    if(op2) {
-                        //Cache Type register
-                        cp15_val = 0;
-                        //printf("Cache Type register\r\n");
+        break;
+    case code_is_mcr:
+        do{
+            shifter_flag = 0;  //no need to use shift
+            uint8_t op2 = (instruction_word >> 5)&0x7;
+            //  cp_num       Rs
+            //  register     Rd
+            //  cp_register  Rn
+            if(Bit20) {
+                //mrc
+                if(Rs == 15) {
+                    uint32_t cp15_val;
+                    if(Rn) {
+                        cp15_val = cp15_read(Rn);
                     } else {
-                        //Main ID register
-                        cp15_val = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5;
+                        //register 0
+                        if(op2) {
+                            //Cache Type register
+                            cp15_val = 0;
+                            //printf("Cache Type register\r\n");
+                        } else {
+                            //Main ID register
+                            cp15_val = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5;
+                        }
                     }
+                    register_write(Rd, cp15_val);
+                    PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, Rn, cp15_val, op2, Rd);
+                } else {
+                    printf("read cp%d_c%d \r\n", Rs, Rn);
+                    getchar();
                 }
-                register_write(Rd, cp15_val);
-                PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, Rn, cp15_val, op2, Rd);
             } else {
-                printf("read cp%d_c%d \r\n", Rs, Rn);
-                getchar();
+                //mcr
+                uint32_t register_val = register_read(Rd);
+                if(Rs == 15) {
+                    cp15_write(Rn, register_val);
+                    PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, Rs, Rn);
+                } else {
+                    printf("write to cp%d_c%d \r\n", Rs, Rn);
+                    getchar();
+                }
             }
-        } else {
-            //mcr
-            uint32_t register_val = register_read(Rd);
-            if(Rs == 15) {
-                cp15_write(Rn, register_val);
-                PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, Rs, Rn);
-            } else {
-                printf("write to cp%d_c%d \r\n", Rs, Rn);
-                getchar();
-            }
-        }
-        return;
-    } else if(code_type == code_is_swp) {
-        if(operand1 & 3) {
-            printf("swp error \r\n");
-            getchar();
-        }
-        /* op1, Rn
-         * op2, Rm
-         */
-        uint32_t tmp = read_word(MEM, operand1);
-        if(mmu_check_status()) {
             return;
-        }
-        write_word(MEM, operand1, operand2);
-        register_write(Rd, tmp);
-        
-        return;
-    } else {
+        }while(0);
+        break;
+    case code_is_swp:
+        do {
+            if(operand1 & 3) {
+                printf("swp error \r\n");
+                getchar();
+            }
+            /* op1, Rn
+             * op2, Rm
+             */
+            uint32_t tmp = read_word(MEM, operand1);
+            if(mmu_check_status()) {
+                return;
+            }
+            write_word(MEM, operand1, operand2);
+            register_write(Rd, tmp);
+            
+            return;
+        }while(0);
+        break;
+    default:
         printf("unknow code_type = %d", code_type);
         getchar();
+        break;
     }
     
     /******************shift**********************/
@@ -1603,71 +1630,106 @@ void execute(void)
     
     /******************shift end*******************/
     
-    if(code_type == code_is_dp0 || code_type == code_is_dp1 || code_type == code_is_dp2) {
-        if(opcode == 0 || opcode == 8) {
+    switch(code_type) {
+    case code_is_dp0:
+    case code_is_dp1:
+    case code_is_dp2:
+        switch(opcode) {
+        case 0:
+        case 8:
             //AND, TST
             operand1 &= operand2;
             operand2 = 0;
-        } else if(opcode == 1 || opcode == 9) {
+            break;
+        case 1:
+        case 9:
             //EOR, TEQ
             operand1 ^= operand2;
             operand2 = 0;
-        } else if(opcode == 2 || opcode == 10) {
+            break;
+        case 2:
+        case 10:
             //SUB, CMP
             add_flag = 0;
-        } else if(opcode == 3) {
+            break;
+        case 3:
             //RSB
-            uint32_t tmp = operand1;
-            operand1 = operand2;
-            operand2 = tmp;
+            {
+                uint32_t tmp = operand1;
+                operand1 = operand2;
+                operand2 = tmp;
+            }
             add_flag = 0;
-        } else if(opcode == 4 || opcode == 11) {
+            break;
+        case 4:
+        case 11:
             //ADD, CMN
-        } else if(opcode == 5) {
+            break;
+        case 5:
             //ADC
             carry = cpsr_c;  //todo...
-        } else if(opcode == 6) {
+            break;
+        case 6:
             //SBC
             carry = !cpsr_c;  //todo...
             add_flag = 0;
-        } else if(opcode == 7) {
+            break;
+        case 7:
             //RSC
             carry = !cpsr_c;  //todo...
             uint32_t tmp = operand1;
             operand1 = operand2;
             operand2 = tmp;
             add_flag = 0;
-        } else if(opcode == 12) {
+            break;
+        case 12:
             //ORR
             operand1 |= operand2;
             operand2 = 0;
-        } else if(opcode == 13) {
+            break;
+        case 13:
             //MOV
             operand1 = 0;
-        } else if(opcode == 14) {
+            break;
+        case 14:
             //BIC
             operand1 &= ~operand2;
             operand2 = 0;
-        } else if(opcode == 15) {
+            break;
+        case 15:
             //MVN
             operand1 = 0;
             operand2 = ~operand2;
+            break;
+        default:
+            break;
         }
-    } else if(code_type == code_is_ldr1 || code_type == code_is_ldr0 || 
-            code_type == code_is_ldrsb1 || code_type == code_is_ldrsh1 || code_type == code_is_ldrh1 ||
-            code_type == code_is_ldrsb0 || code_type == code_is_ldrsh0 || code_type == code_is_ldrh0 )
-    {
-        if(Uf) {
+        break;
+    case code_is_ldr0:
+    case code_is_ldr1:
+    case code_is_ldrsb1:
+    case code_is_ldrsh1:
+    case code_is_ldrh1:
+    case code_is_ldrsb0:
+    case code_is_ldrsh0:
+    case code_is_ldrh0:
+        if(Uf)
             add_flag = 1;
-        } else {
+        else
             add_flag = 0;
-        }
-    } else if(code_type == code_is_mult) {
-        if(opcode == 0) {
-            operand1 = 0;
-        } else if(opcode == 1) {
+        break;
+    case code_is_mult:
+        switch(opcode) {
+        case 1:
             operand1 = register_read(Rd);  //Rd and Rn swap, !!!
+            break;
+        case 0:
+            operand1 = 0;
+            break;
         }
+        break;
+    default:
+        break;
     }
     
     /**************************alu*************************/
@@ -1679,7 +1741,10 @@ void execute(void)
     
     /**************************alu end*********************/
 
-    if(code_type == code_is_dp0 || code_type == code_is_dp1 ||  code_type == code_is_dp2) {
+    switch(code_type) {
+    case code_is_dp0:
+    case code_is_dp1:
+    case code_is_dp2:
         if(Bit24_23 == 2) {
             PRINTF("update flag only \r\n");
         } else {
@@ -1719,7 +1784,9 @@ void execute(void)
                 PRINTF("[DP] cpsr 0x%x copy from spsr %d \r\n", cpsr, cpu_mode);
             }
         }
-    } else if(code_type == code_is_bx || code_type == code_is_b) {
+        break;
+    case code_is_bx:
+    case code_is_b:
         if(Lf) {
             register_write(14, register_read(15) - 4);  //LR register
             PRINTF("write register R%d = 0x%0x, ", 14, register_read(14));
@@ -1731,9 +1798,15 @@ void execute(void)
         }
         register_write(15, aluout & 0xfffffffc);  //PC register
         PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
-    } else if(code_type == code_is_ldr0 || code_type == code_is_ldr1 ||
-       code_type == code_is_ldrsb1 || code_type == code_is_ldrsh1 || code_type == code_is_ldrh1 ||
-       code_type == code_is_ldrsb0 || code_type == code_is_ldrsh0 || code_type == code_is_ldrh0 )
+        break;
+    case code_is_ldr0:
+    case code_is_ldr1:
+    case code_is_ldrsb1:
+    case code_is_ldrsh1:
+    case code_is_ldrh1:
+    case code_is_ldrsb0:
+    case code_is_ldrsh0:
+    case code_is_ldrh0:
     {
         uint32_t address = operand1;  //Rn
         uint32_t data;
@@ -1827,9 +1900,9 @@ void execute(void)
             //LDRT restore cpsr
             cpsr = tmpcpsr;
         }
-        
-    } else if(code_type == code_is_ldm) {
-        
+    }
+        break;
+    case code_is_ldm:
         if(Lf) { //bit [20]
             //LDM
             uint8_t ldm_type = 0;
@@ -1925,7 +1998,10 @@ void execute(void)
                 PRINTF("[STM] write R%d = 0x%0x \r\n", Rn, address);
             }
         }
-    } else if(code_type == code_is_msr1 || code_type == code_is_msr0) {
+        break;
+    case code_is_msr0:
+    case code_is_msr1:
+    {
         uint8_t cpu_mode;
         if(!Bit22) {
             //write cpsr
@@ -1959,8 +2035,9 @@ void execute(void)
             spsr[cpu_mode] |= aluout&0xff000000;
         }
         PRINTF("write register spsr_%d = 0x%x\r\n", cpu_mode, spsr[cpu_mode]);
-        
-    } else if(code_type == code_is_mult) {
+    }
+        break;
+    case code_is_mult:
         register_write(Rn, aluout);   //Rd and Rn swap, !!!
         PRINTF("[MULT] write register R%d = 0x%x\r\n", Rn, aluout);
         
@@ -1973,8 +2050,8 @@ void execute(void)
             //cv unaffected
             PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
         }
-        
-    } else if(code_type == code_is_mrs) {
+        break;
+    case code_is_mrs:
         if(Bit22) {
             uint8_t mode = get_cpu_mode_code();
             register_write(Rd, spsr[mode]);
@@ -1983,10 +2060,12 @@ void execute(void)
             register_write(Rd, cpsr);
             PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr);
         }
-    } else {
+        break;
+    default:
         printf("unsupport code %d\r\n", code_type );
+        getchar();
+        break;
     }
-    
 }
 
 
@@ -2134,3 +2213,4 @@ int main(int argc, char **argv)
 }
 
 /*****************************END OF FILE***************************/
+
