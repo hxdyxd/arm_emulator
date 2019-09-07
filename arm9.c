@@ -2098,9 +2098,13 @@ void list_inc_counter(void)
 }
 #endif
 
+#define IMAGE_LOAD_ADDRESS   (0x8000)
+#define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
+
+
 int main(int argc, char **argv)
 {
-    char *path = "./arm_linux/zImage";
+    char *path = "./arm_linux/Image";
     char *dtb_path = "./arm_linux/arm-emulator.dtb";
     
     uint32_t kips_speed = 40000; //per 10ms
@@ -2109,12 +2113,17 @@ int main(int argc, char **argv)
     }
     printf("KIPS_SPEED = %d\n", kips_speed);
     
-    load_program_memory(path, 0);
-    load_program_memory(dtb_path, MEM_SIZE - 0x4000);
+    /* cpu reset */
     reset_proc();
     
+    /* Load firmware to memory */
+    load_program_memory(path, IMAGE_LOAD_ADDRESS);
+    load_program_memory(dtb_path, DTB_BASE_ADDRESS);
+    
+    /* linux environment */
     register_write(1, 0xffffffff);         //set r1
-    register_write(2, MEM_SIZE - 0x4000);  //set r2
+    register_write(2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
+    register_write(15, IMAGE_LOAD_ADDRESS);            //set pc, jump to Load Address
     
     while(1) {
         code_counter++;
