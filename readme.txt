@@ -2,7 +2,10 @@ simple arm9 emulator with freertos and linux support and only two thousand lines
 https://github.com/hxdyxd/arm-emulator-linux
 https://github.com/hxdyxd/arm_emulator_linux_bin
 
-console log:
+Device Tree Support: 
+https://github.com/hxdyxd/arm-emulator-linux/blob/master/arch/arm/boot/dts/arm-emulator.dts
+
+Console Log:
 KIPS_SPEED = 40000
 load mem start 0x8000, size 0xa1d1a0
 load mem start 0x1ffc000, size 0x4e4
