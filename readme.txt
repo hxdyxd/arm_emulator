@@ -27,54 +27,55 @@ load mem start 0x1ffc000, size 0x4e4
 [    0.000000] NR_IRQS: 16, nr_irqs: 16, preallocated irqs: 16
 [    0.000000] armemulator-ic base address = 0xf001f040
 [    0.000000] armemulator-timer base address = 0xf001f020
-[    0.001000] sched_clock: 32 bits at 1kHz, resolution 1000000ns, wraps every 2147483647500000ns
-[    0.007000] clocksource: timer: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
-[    0.011000] set periodic to 240000
-[    0.019000] Console: colour dummy device 80x30
-[    0.022000] Calibrating delay loop... 11.49 BogoMIPS (lpj=57472)
-[    0.146000] pid_max: default: 32768 minimum: 301
-[    0.161000] Mount-cache hash table entries: 1024 (order: 0, 4096 bytes)
-[    0.165000] Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes)
-[    0.194000] CPU: Testing write buffer coherency: ok
-[    0.211000] Setting up static identity map for 0x100000 - 0x100058
-[    0.247000] devtmpfs: initialized
-[    0.284000] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
-[    0.291000] futex hash table entries: 256 (order: -1, 3072 bytes)
-[    0.312000] NET: Registered protocol family 16
-[    0.333000] DMA: preallocated 256 KiB pool for atomic coherent allocations
-[    0.555000] clocksource: Switched to clocksource timer
-[    0.820000] NET: Registered protocol family 2
-[    0.851000] tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes)
-[    0.858000] TCP established hash table entries: 1024 (order: 0, 4096 bytes)
-[    0.864000] TCP bind hash table entries: 1024 (order: 0, 4096 bytes)
-[    0.868000] TCP: Hash tables configured (established 1024 bind 1024)
-[    0.876000] UDP hash table entries: 256 (order: 0, 4096 bytes)
-[    0.881000] UDP-Lite hash table entries: 256 (order: 0, 4096 bytes)
-[    0.892000] NET: Registered protocol family 1
-[    3.466000] random: fast init done
-[   21.802000] workingset: timestamp_bits=30 max_order=13 bucket_order=0
-[   22.740000] jitterentropy: Initialization failed with host not compliant with requirements: 2
-[   22.746000] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 254)
-[   22.752000] io scheduler mq-deadline registered
-[   22.755000] io scheduler kyber registered
-[   22.772000] io scheduler bfq registered
-[   22.898000] Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
-[   22.941000] printk: console [ttyS0] disabled
-[   22.953000] 40020000.serial: ttyS0 at MMIO 0x40020000 (irq = 17, base_baud = 230400) is a 8250
-[   22.958000] printk: console [ttyS0] enabled
-[   22.958000] printk: console [ttyS0] enabled
-[   22.964000] printk: bootconsole [earlycon0] disabled
-[   22.964000] printk: bootconsole [earlycon0] disabled
-[   23.338000] brd: module loaded
-[   23.370000] NET: Registered protocol family 17
-[   23.373000] Key type dns_resolver registered
-[   23.911000] Freeing unused kernel memory: 4096K
-[   23.914000] Run /init as init process
+[    0.000000] sched_clock: 32 bits at 1kHz, resolution 1000000ns, wraps every 2147483647500000ns
+[    0.000000] clocksource: timer: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.016000] set periodic to 240000
+[    0.016000] Console: colour dummy device 80x30
+[    0.016000] Calibrating delay loop... 27.69 BogoMIPS (lpj=138496)
+[    0.157000] pid_max: default: 32768 minimum: 301
+[    0.157000] Mount-cache hash table entries: 1024 (order: 0, 4096 bytes)
+[    0.157000] Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes)
+[    0.188000] CPU: Testing write buffer coherency: ok
+[    0.188000] Setting up static identity map for 0x100000 - 0x100058
+[    0.203000] devtmpfs: initialized
+[    0.235000] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+[    0.235000] futex hash table entries: 256 (order: -1, 3072 bytes)
+[    0.250000] NET: Registered protocol family 16
+[    0.250000] DMA: preallocated 256 KiB pool for atomic coherent allocations
+[    0.375000] clocksource: Switched to clocksource timer
+[    0.547000] NET: Registered protocol family 2
+[    0.578000] tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes)
+[    0.578000] TCP established hash table entries: 1024 (order: 0, 4096 bytes)
+[    0.578000] TCP bind hash table entries: 1024 (order: 0, 4096 bytes)
+[    0.578000] TCP: Hash tables configured (established 1024 bind 1024)
+[    0.578000] UDP hash table entries: 256 (order: 0, 4096 bytes)
+[    0.578000] UDP-Lite hash table entries: 256 (order: 0, 4096 bytes)
+[    0.594000] NET: Registered protocol family 1
+[    4.016000] random: fast init done
+[   13.688000] workingset: timestamp_bits=30 max_order=13 bucket_order=0
+[   14.282000] jitterentropy: Initialization failed with host not compliant with requirements: 2
+[   14.282000] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 254)
+[   14.282000] io scheduler mq-deadline registered
+[   14.282000] io scheduler kyber registered
+[   14.297000] io scheduler bfq registered
+[   14.375000] Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+[   14.407000] printk: console [ttyS0] disabled
+[   14.407000] 40020000.serial: ttyS0 at MMIO 0x40020000 (irq = 17, base_baud = 230400) is a 8250
+[   14.407000] printk: console [ttyS0] enabled
+[   14.407000] printk: console [ttyS0] enabled
+[   14.407000] printk: bootconsole [earlycon0] disabled
+[   14.407000] printk: bootconsole [earlycon0] disabled
+[   14.657000] brd: module loaded
+[   14.672000] NET: Registered protocol family 17
+[   14.672000] Key type dns_resolver registered
+[   15.000000] Freeing unused kernel memory: 4096K
+[   15.000000] Run /init as init process
 Starting syslogd: OK
 Starting klogd: OK
-Initializing random number generator... [   27.572000] random: dd: uninitialized urandom read (512 bytes read)
+Initializing random number generator... [   17.328000] random: dd: uninitialized urandom read (512 bytes read)
 done.
 Starting network: OK
 
 Welcome to ARM Emulator
-armemulator login:
+armemulator login: root
+[root@armemulator ~]#
