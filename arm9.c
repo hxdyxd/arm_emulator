@@ -265,7 +265,7 @@ struct uart_register {
     uint32_t DLH; //Divisor Latch High, 2
     uint32_t IER; //Interrupt Enable Register, 1
     uint32_t IIR; //Interrupt Identity Register, 2
-    uint32_t FCR; //FIFO¿ØÖÆ¼Ä´æÆ÷, 2
+    uint32_t FCR; //FIFO Control Register
     uint32_t LCR; //Line Control Register, 3
     uint32_t MCR; //Modem Control Register, 4
     uint32_t LSR; //Line Status Register, 5
@@ -375,20 +375,20 @@ void uart_8250_write(struct uart_register *uart, uint8_t address, uint8_t data)
         }
         if( (uart->MCR&0x10) ) {
             //Loopback
-            register_set(uart->MSR, 7, (uart->MCR&0x8) ); //¸¨ÖúÊä³ö2
-            register_set(uart->MSR, 6, (uart->MCR&0x4) ); //¸¨ÖúÊä³ö1
-            register_set(uart->MSR, 5, (uart->MCR&0x1) ); //¸¨ÖúDTR
-            register_set(uart->MSR, 4, (uart->MCR&0x2) ); //¸¨ÖúRTS
+            register_set(uart->MSR, 7, (uart->MCR&0x8) ); //Auxiliary output 2
+            register_set(uart->MSR, 6, (uart->MCR&0x4) ); //Auxiliary output 1
+            register_set(uart->MSR, 5, (uart->MCR&0x1) ); //Auxiliary DTR
+            register_set(uart->MSR, 4, (uart->MCR&0x2) ); //Auxiliary RTS
             
-            register_set(uart->MSR, 3, (uart->MCR&0x8) ); //¸¨ÖúÊä³ö2
-            register_set(uart->MSR, 2, (uart->MCR&0x4) ); //¸¨ÖúÊä³ö1
-            register_set(uart->MSR, 1, (uart->MCR&0x1) ); //¸¨ÖúDTR
-            register_set(uart->MSR, 0, (uart->MCR&0x2) ); //¸¨ÖúRTS
+            register_set(uart->MSR, 3, (uart->MCR&0x8) ); //Auxiliary output 2
+            register_set(uart->MSR, 2, (uart->MCR&0x4) ); //Auxiliary output 1
+            register_set(uart->MSR, 1, (uart->MCR&0x1) ); //Auxiliary DTR
+            register_set(uart->MSR, 0, (uart->MCR&0x2) ); //Auxiliary RTS
             //printf("Loopback msr = 0x%x\n", uart->MSR);
         } else {
             uart->MSR = 0;
-            register_set(uart->MSR, 5, 1);  //DSR×¼±¸¾ÍÐ÷
-            register_set(uart->MSR, 4, 1);  //CTSÓÐÐ§
+            register_set(uart->MSR, 5, 1);  //DSR准备就绪
+            register_set(uart->MSR, 4, 1);  //CTS有效
         }
         
         break;
@@ -2239,4 +2239,3 @@ int main(int argc, char **argv)
 }
 
 /*****************************END OF FILE***************************/
-
