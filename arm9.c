@@ -265,7 +265,7 @@ struct uart_register {
     uint32_t DLH; //Divisor Latch High, 2
     uint32_t IER; //Interrupt Enable Register, 1
     uint32_t IIR; //Interrupt Identity Register, 2
-    uint32_t FCR; //FIFO¿ØÖÆ¼Ä´æÆ÷, 2
+    uint32_t FCR; //FIFOÂ¿Ã˜Ã–Ã†Â¼Ã„Â´Ã¦Ã†Ã·, 2
     uint32_t LCR; //Line Control Register, 3
     uint32_t MCR; //Modem Control Register, 4
     uint32_t LSR; //Line Status Register, 5
@@ -375,20 +375,20 @@ void uart_8250_write(struct uart_register *uart, uint8_t address, uint8_t data)
         }
         if( (uart->MCR&0x10) ) {
             //Loopback
-            register_set(uart->MSR, 7, (uart->MCR&0x8) ); //¸¨ÖúÊä³ö2
-            register_set(uart->MSR, 6, (uart->MCR&0x4) ); //¸¨ÖúÊä³ö1
-            register_set(uart->MSR, 5, (uart->MCR&0x1) ); //¸¨ÖúDTR
-            register_set(uart->MSR, 4, (uart->MCR&0x2) ); //¸¨ÖúRTS
+            register_set(uart->MSR, 7, (uart->MCR&0x8) ); //Â¸Â¨Ã–ÃºÃŠÃ¤Â³Ã¶2
+            register_set(uart->MSR, 6, (uart->MCR&0x4) ); //Â¸Â¨Ã–ÃºÃŠÃ¤Â³Ã¶1
+            register_set(uart->MSR, 5, (uart->MCR&0x1) ); //Â¸Â¨Ã–ÃºDTR
+            register_set(uart->MSR, 4, (uart->MCR&0x2) ); //Â¸Â¨Ã–ÃºRTS
             
-            register_set(uart->MSR, 3, (uart->MCR&0x8) ); //¸¨ÖúÊä³ö2
-            register_set(uart->MSR, 2, (uart->MCR&0x4) ); //¸¨ÖúÊä³ö1
-            register_set(uart->MSR, 1, (uart->MCR&0x1) ); //¸¨ÖúDTR
-            register_set(uart->MSR, 0, (uart->MCR&0x2) ); //¸¨ÖúRTS
+            register_set(uart->MSR, 3, (uart->MCR&0x8) ); //Â¸Â¨Ã–ÃºÃŠÃ¤Â³Ã¶2
+            register_set(uart->MSR, 2, (uart->MCR&0x4) ); //Â¸Â¨Ã–ÃºÃŠÃ¤Â³Ã¶1
+            register_set(uart->MSR, 1, (uart->MCR&0x1) ); //Â¸Â¨Ã–ÃºDTR
+            register_set(uart->MSR, 0, (uart->MCR&0x2) ); //Â¸Â¨Ã–ÃºRTS
             //printf("Loopback msr = 0x%x\n", uart->MSR);
         } else {
             uart->MSR = 0;
-            register_set(uart->MSR, 5, 1);  //DSR×¼±¸¾ÍÐ÷
-            register_set(uart->MSR, 4, 1);  //CTSÓÐÐ§
+            register_set(uart->MSR, 5, 1);  //DSRÃ—Â¼Â±Â¸Â¾ÃÃÃ·
+            register_set(uart->MSR, 4, 1);  //CTSÃ“ÃÃÂ§
         }
         
         break;
@@ -592,11 +592,11 @@ static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, u
 {
     switch(ap) {
     case 0:
-        if(!cp15_ctl_s & cp15_ctl_r & !wr)
+        if(!cp15_ctl_s && cp15_ctl_r && !wr)
             return 0;
-        if(cp15_ctl_s & !cp15_ctl_r & !wr & privileged)
+        if(cp15_ctl_s && !cp15_ctl_r && !wr && privileged)
             return 0;
-        if(cp15_ctl_s & cp15_ctl_r) {
+        if(cp15_ctl_s && cp15_ctl_r) {
             printf("mmu_check_access_permissions fault\r\n");
             exception_out();
         }
@@ -606,7 +606,7 @@ static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, u
             return 0;
         break;
     case 2:
-        if(privileged | !wr)
+        if(privileged || !wr)
             return 0;
         break;
     case 3:
@@ -2107,6 +2107,7 @@ int main(int argc, char **argv)
     char *path = "./arm_linux/Image";
     char *dtb_path = "./arm_linux/arm-emulator.dtb";
     
+    //kips_speedï¼ŒAvoid system call frequently
     uint32_t kips_speed = 40000; //per 10ms
     if(argc > 1) {
         kips_speed = atoi(argv[1]);
@@ -2120,7 +2121,7 @@ int main(int argc, char **argv)
     load_program_memory(path, IMAGE_LOAD_ADDRESS);
     load_program_memory(dtb_path, DTB_BASE_ADDRESS);
     
-    /* linux environment */
+    /* linux environment, Kernel boot conditions */
     register_write(1, 0xffffffff);         //set r1
     register_write(2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
     register_write(15, IMAGE_LOAD_ADDRESS);            //set pc, jump to Load Address
@@ -2128,6 +2129,7 @@ int main(int argc, char **argv)
     while(1) {
         code_counter++;
 #if 0
+        //Debug code
         uint32_t pc = register_read(15) - 4;
         if(pc <= 0x10250 &&  pc >= 0x10210  &&  cp15_ctl_m) {
             abort_test = 1;
@@ -2141,6 +2143,7 @@ int main(int argc, char **argv)
             interrupt_exception(INT_EXCEPTION_PREABT);
             mmu_fault = 0;
 #if 0
+            //Debug fetch fault
             printf("-------preAbt cp15_far %x-------\n", cp15_far);
             exception_out();
 #endif
@@ -2151,6 +2154,7 @@ int main(int argc, char **argv)
             continue;
         }
 #if 0
+        //Debug Frequency of each instructions
         if(code_type < 23) {
             inc_counter[code_type]++;
         }
@@ -2161,6 +2165,7 @@ int main(int argc, char **argv)
         if(swi_flag) {
             swi_flag = 0;
 #if 0
+            //Debug system call number for linux kernel
             uint32_t call_number = register_read(7);
             printf(" swi r7 = %d\n", call_number);
 #endif
@@ -2170,15 +2175,26 @@ int main(int argc, char **argv)
             interrupt_exception(INT_EXCEPTION_DATAABT);
             mmu_fault = 0;
 #if 0
+            //Debug data fault
             printf("-------code is %d, cp15_far %x------\n", code_type, cp15_far);
             exception_out();
 #endif
         } else if(TIM.EN && !cpsr_i && code_counter%kips_speed == 0 ) {
             //timer enable, int_controler enable, cpsr_irq not disable
-            //per 100 millisecond timer irq
+            //per 10 millisecond timer irq
+            //kips_speedï¼šAvoid calling GET_TICK functions frequently
             static uint32_t tick_timer = 0;
             uint32_t new_tick_timer = GET_TICK();
             if(new_tick_timer - tick_timer >= 10) {
+#if 0
+                //Debug instructions per 10ms, kips_speed should be less than this value
+                static uint32_t code_counter_tmp = 0, slow_count = 0;
+                if(slow_count++ >= 100) {
+                    slow_count = 0;
+                    printf("i/10ms,%d\n", code_counter - code_counter_tmp);
+                }
+                code_counter_tmp = code_counter;
+#endif
                 tick_timer = new_tick_timer;
                 interrupt_happen(0);
             }
@@ -2209,6 +2225,7 @@ int main(int argc, char **argv)
         }
 #endif
 #if 0
+        //Debug code
         if(abort_test) {
             exception_out();
             abort_test = 0;
