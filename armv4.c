@@ -1,102 +1,6 @@
-/* 2019 06 26 */
+/* 2020 03 11 */
 /* By hxdyxd */
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
-#include <conio.h>
-
-#define  KBHIT()      kbhit()
-#define  GETCH()      getch()
-#define  PUTCHAR(c)   putchar(c)
-#define  GET_TICK()   (clock()*1000/CLOCKS_PER_SEC)
-
-
-static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr);
-void interrupt_exception(uint8_t type);
-
-/****************************************************/
-//Memary size
-
-#define MEM_SIZE   (0x2000000)  //32M
-/****************************************************/
-
-#define DEBUG                  0
-
-
-uint8_t abort_test = 0;
-
-#define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
-
-#define  IS_SET(v, bit) ( ((v)>>(bit))&1 )
-
-
-uint32_t spsr[7] = {0, };
-#define  cpsr    spsr[0]
-
-
-#define  cpsr_n_set(v)  do{ if(v) {cpsr |= 1 << 31;} else {cpsr &= ~(1 << 31);} }while(0)
-#define  cpsr_z_set(v)  do{ if(v) {cpsr |= 1 << 30;} else {cpsr &= ~(1 << 30);} }while(0)
-#define  cpsr_c_set(v)  do{ if(v) {cpsr |= 1 << 29;} else {cpsr &= ~(1 << 29);} }while(0)
-#define  cpsr_v_set(v)  do{ if(v) {cpsr |= 1 << 28;} else {cpsr &= ~(1 << 28);} }while(0)
-
-#define  cpsr_i_set(v)  do{ if(v) {cpsr |= 1 << 7;} else {cpsr &= ~(1 << 7);} }while(0)
-#define  cpsr_f_set(v)  do{ if(v) {cpsr |= 1 << 6;} else {cpsr &= ~(1 << 6);} }while(0)
-#define  cpsr_t_set(v)  do{ if(v) {cpsr |= 1 << 5;} else {cpsr &= ~(1 << 5);} }while(0)
-
-#define  cpsr_n  IS_SET(cpsr, 31)
-#define  cpsr_z  IS_SET(cpsr, 30)
-#define  cpsr_c  IS_SET(cpsr, 29)
-#define  cpsr_v  IS_SET(cpsr, 28)
-#define  cpsr_q  IS_SET(cpsr, 27)
-#define  cpsr_i  IS_SET(cpsr, 7)
-#define  cpsr_f  IS_SET(cpsr, 6)
-#define  cpsr_t  IS_SET(cpsr, 5)
-#define  cpsr_m  (cpsr&0x1f)
-
-#define 	CPSR_M_USR   0x10U
-#define 	CPSR_M_FIQ   0x11U
-#define 	CPSR_M_IRQ   0x12U
-#define 	CPSR_M_SVC   0x13U
-#define 	CPSR_M_MON   0x16U
-#define 	CPSR_M_ABT   0x17U
-#define 	CPSR_M_HYP   0x1AU
-#define 	CPSR_M_UND   0x1BU
-#define 	CPSR_M_SYS   0x1FU
-
-
-//memory
-static uint8_t MEM[MEM_SIZE];
-
-//intermediate datapath and control path signals
-static uint32_t instruction_word;
-
-const char *opcode_table[16] = {
-    "AND", "EOR", "SUB", "RSB", 
-    "ADD", "ADC", "SBC", "RSC", 
-    "TST", "TEQ", "CMP", "CMN", 
-    "ORR", "MOV", "BIC", "MVN"
-};
-
-const char *shift_table[4] = {
-    "LSL", //00
-    "LSR", //01
-    "ASR", //10
-    "ROR", //11
-};
-
-uint32_t code_counter = 0;
-
-//register function
-uint32_t Register[7][16];
-#define   CPU_MODE_USER      0
-#define   CPU_MODE_FIQ       1
-#define   CPU_MODE_IRQ       2
-#define   CPU_MODE_SVC       3
-#define   CPU_MODE_Undef     4
-#define   CPU_MODE_Abort     5
-#define   CPU_MODE_Mon       6
+#include <armv4.h>
 
 const char *string_register_mode[7] = {
     "USER",
@@ -107,12 +11,28 @@ const char *string_register_mode[7] = {
     "Abort",
     "Mon",
 };
+const char *opcode_table[16] = {
+    "AND", "EOR", "SUB", "RSB", 
+    "ADD", "ADC", "SBC", "RSC", 
+    "TST", "TEQ", "CMP", "CMN", 
+    "ORR", "MOV", "BIC", "MVN"
+};
+const char *shift_table[4] = {
+    "LSL", //00
+    "LSR", //01
+    "ASR", //10
+    "ROR", //11
+};
 
 
-uint8_t get_cpu_mode_code(void)
+/*
+ * get_cpu_mode_code
+ * author:hxdyxd
+ */
+static uint8_t get_cpu_mode_code(struct armv4_cpu_t *cpu)
 {
     uint8_t cpu_mode = 0;
-    switch(cpsr_m) {
+    switch(cpsr_m(cpu)) {
     case CPSR_M_USR:
     case CPSR_M_SYS:
         cpu_mode = CPU_MODE_USER; //0
@@ -137,468 +57,128 @@ uint8_t get_cpu_mode_code(void)
         break;
     default:
         cpu_mode = 0;
-        PRINTF("cpu mode is unknown %x\r\n", cpsr_m);
-        getchar();
+        ERROR("cpu mode is unknown %x\r\n", cpsr_m(cpu));
     }
     return cpu_mode;
 }
 
-#define register_read_user_mode(id)  Register[0][id]
-#define register_write_user_mode(id,v)  Register[0][id] = v
 
-static inline uint32_t register_read(uint8_t id)
+#define register_read_user_mode(cpu,id)  cpu->reg[0][id]
+#define register_write_user_mode(cpu,id,v)  cpu->reg[0][id] = v
+
+/*
+ * register_read
+ * author:hxdyxd
+ */
+uint32_t register_read(struct armv4_cpu_t *cpu, uint8_t id)
 {
     //Register file
     if(id < 8) {
-        return Register[CPU_MODE_USER][id];
+        return cpu->reg[CPU_MODE_USER][id];
     } else if(id == 15) {
-        return Register[CPU_MODE_USER][id] + 4;
-    } else if(cpsr_m == CPSR_M_USR || cpsr_m == CPSR_M_SYS) {
-        return Register[CPU_MODE_USER][id];
-    } else if(cpsr_m != CPSR_M_FIQ && id < 13) {
-        return Register[CPU_MODE_USER][id];
+        return cpu->reg[CPU_MODE_USER][id] + 4;
+    } else if(cpsr_m(cpu) == CPSR_M_USR || cpsr_m(cpu) == CPSR_M_SYS) {
+        return cpu->reg[CPU_MODE_USER][id];
+    } else if(cpsr_m(cpu) != CPSR_M_FIQ && id < 13) {
+        return cpu->reg[CPU_MODE_USER][id];
     } else {
-        PRINTF("<%x>", cpsr_m);
-        return Register[get_cpu_mode_code()][id];
+        PRINTF("<%x>", cpsr_m(cpu));
+        return cpu->reg[get_cpu_mode_code(cpu)][id];
     }
 }
 
-static inline void register_write(uint8_t id, uint32_t val)
+/*
+ * register_write
+ * author:hxdyxd
+ */
+void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val)
 {
     //Register file
     if(id < 8 || id == 15) {
-        Register[CPU_MODE_USER][id] = val;
-    } else if(cpsr_m == CPSR_M_USR || cpsr_m == CPSR_M_SYS) {
-        Register[CPU_MODE_USER][id] = val;
-    } else if(cpsr_m != CPSR_M_FIQ && id < 13) {
-        Register[CPU_MODE_USER][id] = val;
+        cpu->reg[CPU_MODE_USER][id] = val;
+    } else if(cpsr_m(cpu) == CPSR_M_USR || cpsr_m(cpu) == CPSR_M_SYS) {
+        cpu->reg[CPU_MODE_USER][id] = val;
+    } else if(cpsr_m(cpu) != CPSR_M_FIQ && id < 13) {
+        cpu->reg[CPU_MODE_USER][id] = val;
     } else {
-        PRINTF("<%x>", cpsr_m);
-        Register[get_cpu_mode_code()][id] = val;
+        PRINTF("<%x>", cpsr_m(cpu));
+        cpu->reg[get_cpu_mode_code(cpu)][id] = val;
     }
 }
 
-
-static inline void exception_out(void)
+/*
+ * exception_out
+ * author:hxdyxd
+ */
+static void exception_out(struct armv4_cpu_t *cpu)
 {
     //return;
-    uint8_t cur_mode  = get_cpu_mode_code();
-    printf("PC = 0x%x , code = %d\r\n", register_read(15), code_counter);
-    printf("cpsr = 0x%x, %s\n", cpsr, string_register_mode[cur_mode]);
-    printf("User mode register:");
+    uint8_t cur_mode  = get_cpu_mode_code(cpu);
+    WARN("PC = 0x%x , code = %d\r\n", register_read(cpu, 15), cpu->code_counter);
+    WARN("cpsr = 0x%x, %s\n", cpsr(cpu), string_register_mode[cur_mode]);
+    WARN("User mode register:");
     for(int i=0; i<16; i++) {
         if(i % 4 == 0) {
-            printf("\n");
+            WARN("\n");
         }
-        printf("R%2d = 0x%08x, ", i, Register[CPU_MODE_USER][i]);
+        WARN("R%2d = 0x%08x, ", i, cpu->reg[CPU_MODE_USER][i]);
     }
-    printf("\r\nPrivileged mode register\r\n");
+    WARN("\r\nPrivileged mode register\r\n");
     for(int i=1; i<7; i++) {
-        printf("R%2d = 0x%08x, ", 13, Register[i][13]);
-        printf("R%2d = 0x%08x, ", 14, Register[i][14]);
-        printf("%s \n", string_register_mode[i]);
+        WARN("R%2d = 0x%08x, ", 13, cpu->reg[i][13]);
+        WARN("R%2d = 0x%08x, ", 14, cpu->reg[i][14]);
+        WARN("%s \n", string_register_mode[i]);
     }
-    getchar();
-}
-
-/*
- *  interrupt_exception
- */
-#define  INT_EXCEPTION_RESET      (0)
-#define  INT_EXCEPTION_UNDEF      (1)
-#define  INT_EXCEPTION_FIQ        (2)
-#define  INT_EXCEPTION_IRQ        (3)
-#define  INT_EXCEPTION_PREABT     (4)
-#define  INT_EXCEPTION_SWI        (5)
-#define  INT_EXCEPTION_DATAABT    (6)
-
-
-/******************************interrupt**************************************/
-struct interrupt_register {
-    uint32_t MSK; //Determine which interrupt source is masked.
-    uint32_t PND; //Indicate the interrupt request status
-};
-
-struct interrupt_register INT;
-
-
-#define   int_reset()      do{\
- INT.MSK = 0xFFFFFFFF;\
- INT.PND = 0x00000000;\
-}while(0)
-
-#define  int_is_set(v, bit) ( ((v)>>(bit))&1 )
-
-static inline uint32_t interrupt_happen(uint32_t id)
-{
-    if( int_is_set(INT.MSK, id) || int_is_set(INT.PND, id) ) {
-        //masked or not cleared
-        return 0;
-    }
-    INT.PND |= 1 << id;
-    interrupt_exception(INT_EXCEPTION_IRQ);
-    return 1;
-}
-
-/******************************interrupt**************************************/
-
-/*******************************timer*****************************************/
-
-struct timer_register {
-    uint32_t CNT; //Determine which interrupt source is masked.
-    uint32_t EN; //Indicate the interrupt request status
-};
-
-struct timer_register TIM;
-
-#define   tim_reset()      do{\
- TIM.CNT = 0x00000000;\
- TIM.EN =  0x00000000;\
-}while(0)
-
-/*******************************timer*****************************************/
-
-/*******************************uart*****************************************/
-
-struct uart_register {
-    uint32_t DLL; //Divisor Latch Low, 1
-    uint32_t DLH; //Divisor Latch High, 2
-    uint32_t IER; //Interrupt Enable Register, 1
-    uint32_t IIR; //Interrupt Identity Register, 2
-    uint32_t FCR; //FIFO Control Register
-    uint32_t LCR; //Line Control Register, 3
-    uint32_t MCR; //Modem Control Register, 4
-    uint32_t LSR; //Line Status Register, 5
-    uint32_t MSR; //Modem Status Registe, 6
-    uint32_t SCR;
-    uint32_t RBR;
-};
-
-struct uart_register UART[1];
-
-void uart_8250_reset(void) 
-{
-    memset(UART, 0, sizeof(UART));
-    UART[0].IIR = 0x01;
-    UART[0].LSR = 0x60;
-}
-
-#define UART_LCR_DLAB(uart)   ((uart)->LCR & 0x80)
-#define  register_set(r,b,v)  do{ if(v) {r |= 1 << (b);} else {r &= ~(1 << (b));} }while(0)
-
-uint8_t uart_8250_read(struct uart_register *uart, uint8_t address)
-{
-    PRINTF("uart read 0x%x\n", address);
-    switch(address) {
-    case 0x0:
-        if(UART_LCR_DLAB(uart)) {
-            //Divisor Latch Low
-            return uart->DLL;
-        } else {
-            //Receive Buffer Register
-            register_set(UART[0].LSR, 0, 0);
-            if( KBHIT() )
-                uart->RBR = GETCH();
-            return uart->RBR;
-        }
-        break;
-    case 0x4:
-        if(UART_LCR_DLAB(uart)) {
-            //Divisor Latch High
-            return uart->DLH;
-        } else {
-            //Interrupt Enable Register 
-            return uart->IER;
-        }
-        break;
-    case 0x8:
-        //Interrupt Identity Register
-        return uart->IIR;
-    case 0xc:
-        //Line Control Register
-        return uart->LCR;
-    case 0x10:
-        //Modem Control Register
-        return uart->MCR;
-    case 0x14:
-        //Line Status Register, read-only
-        return uart->LSR;
-    case 0x18:
-        //Modem Status Registe, read-only
-        return uart->MSR;
-    case 0x1c:
-        //Scratchpad Register
-        return uart->SCR;
-    default:
-        PRINTF("uart read %x\n", address);
-    }
-    return 0;
-}
-
-void uart_8250_write(struct uart_register *uart, uint8_t address, uint8_t data)
-{
-    PRINTF("uart write 0x%x 0x%x\n", address, data);
-    switch(address) {
-    case 0x0:
-        if(UART_LCR_DLAB(uart)) {
-            //Divisor Latch Low
-            uart->DLL = data;
-        } else {
-            //Transmit Holding Register
-            PUTCHAR(data);
-        }
-        break;
-    case 0x4:
-        if(UART_LCR_DLAB(uart)) {
-            //Divisor Latch High
-            uart->DLH = data;
-        } else {
-            //Interrupt Enable Register 
-            uart->IER = data;
-        }
-        break;
-    case 0x8:
-        //FIFO Control Register
-        uart->FCR = data;
-        break;
-    case 0xc:
-        //Line Control Register
-        uart->LCR = data;
-        break;
-    case 0x10:{
-        //Modem Control Register
-        uint8_t lastmcr = uart->MCR;
-        uart->MCR = data;
-        if( (uart->MCR&1) ^ (lastmcr&1) ) {
-            //set DSR
-            uart->MSR |=  (1<<1);
-        }
-        if( (uart->MCR&0x10) ) {
-            //Loopback
-            register_set(uart->MSR, 7, (uart->MCR&0x8) ); //Auxiliary output 2
-            register_set(uart->MSR, 6, (uart->MCR&0x4) ); //Auxiliary output 1
-            register_set(uart->MSR, 5, (uart->MCR&0x1) ); //Auxiliary DTR
-            register_set(uart->MSR, 4, (uart->MCR&0x2) ); //Auxiliary RTS
-            
-            register_set(uart->MSR, 3, (uart->MCR&0x8) ); //Auxiliary output 2
-            register_set(uart->MSR, 2, (uart->MCR&0x4) ); //Auxiliary output 1
-            register_set(uart->MSR, 1, (uart->MCR&0x1) ); //Auxiliary DTR
-            register_set(uart->MSR, 0, (uart->MCR&0x2) ); //Auxiliary RTS
-            //printf("Loopback msr = 0x%x\n", uart->MSR);
-        } else {
-            uart->MSR = 0;
-            register_set(uart->MSR, 5, 1);  //DSR准备就绪
-            register_set(uart->MSR, 4, 1);  //CTS有效
-        }
-        
-        break;
-    }
-    case 0x14:
-    case 0x18:
-        break;
-    case 0x1c:
-        //uart->SCR = data;
-        break;
-    default:
-        PRINTF("uart write %x\n", address);
-    }
+    ERROR("stop\n");
 }
 
 
+/*************cp15************/
 
-/*******************************uart*****************************************/
-
-
-/*  memory */
-#define  MMU_EXCEPTION_ADDR      0x4001f050
-#define  is_privileged            (cpsr_m != CPSR_M_USR)
-
-#define  read_word_without_mmu(a)       read_mem(0,a,0,3)
-#define  read_word(m,a)                 read_mem(is_privileged,a,1,3)
-#define  read_halfword(m,a)             (read_mem(is_privileged,a,1,1) & 0xffff)
-#define  read_byte(m,a)                 (read_mem(is_privileged,a,1,0) & 0xff)
-
-#define  read_word_mode(m,a)                 read_mem(m,a,1,3)
-#define  read_halfword_mode(m,a)             (read_mem(m,a,1,1) & 0xffff)
-#define  read_byte_mode(m,a)                 (read_mem(m,a,1,0) & 0xff)
-
-
-static inline uint32_t read_mem(uint8_t privileged, uint32_t address, uint8_t mmu, uint8_t mask)
-{
-    if(address&mask) {
-        //Check address alignment
-        printf("memory address alignment error 0x%x\n", address);
-        exception_out();
-    }
-    
-    if(mmu) {
-        address = mmu_transfer(address, privileged, 0); //read
-    }
-    
-    if( (address>>20) ==0x400) {
-        //1M Peripheral memory
-        if(address == 0x4001f040) {
-            return INT.MSK;
-        } else if(address == 0x4001f044) {
-            return INT.PND;
-        } else if(address == 0x4001f000) {
-            return 1;
-        } else if(address == 0x4001f020) {
-            //sys clock ms
-            return GET_TICK();
-        } else if(address == 0x4001f024) {
-            //timer
-            return TIM.EN;
-        } else if(address == 0x4001f030) {
-            //code counter
-            return code_counter;
-        } else if(address == MMU_EXCEPTION_ADDR) {
-            return 0xffffffff;
-        } else if( (address&0xfffffc00) == 0x40020000) {
-            //uart
-            return uart_8250_read(&UART[0], (uint8_t)address);
-        }
-    }
-    
-    if(address >= MEM_SIZE) {
-        printf("mem overflow error, read 0x%x\r\n", address);
-        exception_out();
-    }
-    
-    return *((int*)(MEM + address));
-}
-
-#define  write_word(m,a,d)         write_mem(is_privileged,a,d,3)
-#define  write_halfword(m,a,d)     write_mem(is_privileged,a,(d)&0xffff,1)
-#define  write_byte(m,a,d)         write_mem(is_privileged,a,(d)&0xff,0)
-
-#define  write_word_mode(m,a,d)         write_mem(m,a,d,3)
-#define  write_halfword_mode(m,a,d)     write_mem(m,a,(d)&0xffff,1)
-#define  write_byte_mode(m,a,d)         write_mem(m,a,(d)&0xff,0)
-
-static inline void write_mem(uint8_t privileged, uint32_t address, uint32_t data,  uint8_t mask)
-{
-    if(address&mask) {
-        //Check address alignment
-        printf("memory address alignment error 0x%x\n", address);
-        exception_out();
-    }
-    
-    address = mmu_transfer(address, privileged, 1); //write
-    
-    if( (address>>20) ==0x400) {
-        //1M Peripheral memory
-        if(address == 0x4001f004) {
-            PUTCHAR(data);
-            return;
-        } else if(address == 0x4001f040) {
-            INT.MSK = data;
-            return;
-        } else if(address == 0x4001f044) {
-            INT.PND = data;
-            return;
-        } else  if(address == 0x4001f030) {
-            //ips
-            code_counter = data;
-            return;
-        } else if(address == 0x4001f024) {
-            //timer
-            TIM.EN = data;
-            return;
-        } else if(address == MMU_EXCEPTION_ADDR) {
-            return;
-        } else if( (address&0xfffffc00) == 0x40020000) {
-            //uart
-            uart_8250_write(&UART[0], (uint8_t)address, (uint8_t)data);
-            return;
-        }
-    }
-    
-    if(address >= MEM_SIZE) {
-        printf("mem error, write %d = 0x%0x\r\n", mask, address);
-        exception_out();
-    }
-    
-    switch(mask) {
-    case 3:
-        {    
-            int *data_p = (int *) (MEM + address);
-            *data_p = data;
-        }
-        break;
-    case 1:
-        {
-            short *data_p = (short *) (MEM + address);
-            *data_p = data;
-        }
-        break;
-    default:
-        {
-            char * data_p = (char *) (MEM + address);
-            *data_p = data;
-        }
-        break;
-    }
-}
-/*  memory */
-
-
-/***cp15***************************************************************/
-
-/*
- *  CP15
- */
-static uint32_t Register_cp15[16] = {0,};
-
-#define   cp15_ctl            Register_cp15[1]
-#define   cp15_ttb            Register_cp15[2]
-#define   cp15_domain         Register_cp15[3]
+#define   cp15_ctl(mmu)            (mmu)->reg[1]
+#define   cp15_ttb(mmu)            (mmu)->reg[2]
+#define   cp15_domain(mmu)         (mmu)->reg[3]
 /* Fault Status Register, [7:4]domain  [3:0]status */
-#define   cp15_fsr            Register_cp15[5]
+#define   cp15_fsr(mmu)            (mmu)->reg[5]
 /* Fault Address Register */
-#define   cp15_far            Register_cp15[6]
+#define   cp15_far(mmu)            (mmu)->reg[6]
 
 
 
-#define   cp15_read(r)      Register_cp15[r]
-#define   cp15_write(r,d)   Register_cp15[r] = d
-#define   cp15_reset()      memset(Register_cp15, 0, sizeof(Register_cp15))
+#define   cp15_read(mmu,r)      (mmu)->reg[r]
+#define   cp15_write(mmu,r,d)   (mmu)->reg[r] = d
+#define   cp15_reset(mmu)      memset((mmu)->reg, 0, sizeof((mmu)->reg))
 
 
 //mmu enable
-#define  cp15_ctl_m  IS_SET(cp15_ctl, 0)
+#define  cp15_ctl_m(mmu)  IS_SET(cp15_ctl(mmu), 0)
 //Alignment fault checking
-#define  cp15_ctl_a  IS_SET(cp15_ctl, 1)
+#define  cp15_ctl_a(mmu)  IS_SET(cp15_ctl(mmu), 1)
 //System protection bit
-#define  cp15_ctl_s  IS_SET(cp15_ctl, 8)
+#define  cp15_ctl_s(mmu)  IS_SET(cp15_ctl(mmu), 8)
 //ROM protection bit
-#define  cp15_ctl_r  IS_SET(cp15_ctl, 9)
+#define  cp15_ctl_r(mmu)  IS_SET(cp15_ctl(mmu), 9)
 //high vectors
-#define  cp15_ctl_v  IS_SET(cp15_ctl, 13)
+#define  cp15_ctl_v(mmu)  IS_SET(cp15_ctl(mmu), 13)
 
-uint8_t mmu_fault = 0;
-
-/*
- *  return 1, mmu exception
- */
-#define mmu_check_status()   mmu_fault
 
 
 /*
  *  uint8_t wr:                write: 1, read: 0
  *  uint8_t privileged:   privileged: 1, user: 0
+ * author:hxdyxd
  */
-static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, uint8_t wr)
+static inline int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap, uint8_t privileged, uint8_t wr)
 {
     switch(ap) {
     case 0:
-        if(!cp15_ctl_s && cp15_ctl_r && !wr)
+        if(!cp15_ctl_s(mmu) && cp15_ctl_r(mmu) && !wr)
             return 0;
-        if(cp15_ctl_s && !cp15_ctl_r && !wr && privileged)
+        if(cp15_ctl_s(mmu) && !cp15_ctl_r(mmu) && !wr && privileged)
             return 0;
-        if(cp15_ctl_s && cp15_ctl_r) {
-            printf("mmu_check_access_permissions fault\r\n");
-            exception_out();
+        if(cp15_ctl_s(mmu) && cp15_ctl_r(mmu)) {
+            WARN("mmu_check_access_permissions fault\r\n");
+            ERROR("MMU stop\n");
         }
         break;
     case 1:
@@ -619,91 +199,93 @@ static inline int mmu_check_access_permissions(uint8_t ap, uint8_t privileged, u
 /*
  *  uint8_t wr:                write: 1, read: 0
  *  uint8_t privileged:   privileged: 1, user: 0
+ * author:hxdyxd
  */
-static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t wr)
+static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr, uint8_t privileged, uint8_t wr)
 {
-    mmu_fault = 0;
-    if(!cp15_ctl_m) {
+    struct mmu_t *mmu = &cpu->mmu;
+    mmu->mmu_fault = 0;
+    if(!cp15_ctl_m(mmu)) {
         return vaddr;
     }
-    if(cp15_ctl_a) {
+    if(cp15_ctl_a(mmu)) {
         //Check address alignment
         
     }
     //section page table, store size 16KB
-    uint32_t page_table_entry = read_word_without_mmu( (cp15_ttb&0xFFFFC000)|((vaddr&0xFFF00000) >> 18));
+    uint32_t page_table_entry = read_word_without_mmu(cpu, (cp15_ttb(mmu)&0xFFFFC000)|((vaddr&0xFFF00000) >> 18));
     uint8_t first_level_descriptor = page_table_entry&3;
     if(first_level_descriptor == 0) {
         //Section translation fault
-        cp15_fsr = 0x5;
-        cp15_far = vaddr;
-        mmu_fault = 1;
+        cp15_fsr(mmu) = 0x5;
+        cp15_far(mmu) = vaddr;
+        mmu->mmu_fault = 1;
         PRINTF("Section translation fault va = 0x%x\r\n", vaddr);
         //exception_out();
     } else if(first_level_descriptor == 2) {
         //section entry
         uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
         uint8_t domainval = domain << 1;
-        domainval = (cp15_domain >> domainval)&0x3;
+        domainval = (cp15_domain(mmu) >> domainval)&0x3;
         if(domainval == 0) {
             //Section domain fault
-            cp15_fsr = (domain << 4) | 0x9;
-            cp15_far = vaddr;
-            mmu_fault = 1;
-            printf("Section domain fault\r\n");
+            cp15_fsr(mmu) = (domain << 4) | 0x9;
+            cp15_far(mmu) = vaddr;
+            mmu->mmu_fault = 1;
+            WARN("Section domain fault\r\n");
             //getchar();
         } else if(domainval == 1) {
             //Client, Check access permissions
             uint8_t ap = (page_table_entry>>10)&0x3;
-            if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
+            if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
                 return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
             } else {
                 //Section permission fault
-                cp15_fsr = (domain << 4) | 0xd;
-                cp15_far = vaddr;
-                mmu_fault = 1;
-                printf("Section permission fault\r\n");
+                cp15_fsr(mmu) = (domain << 4) | 0xd;
+                cp15_far(mmu) = vaddr;
+                mmu->mmu_fault = 1;
+                WARN("Section permission fault\r\n");
                 //getchar();
             }
         } else if(domainval == 3) {
             //Manager
             return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
         } else {
-            printf("mmu fault\r\n");
-            exception_out();
+            WARN("mmu fault\r\n");
+            exception_out(cpu);
         }
         
     } else {
         //page table
         uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
         uint8_t domainval =  domain << 1;
-        domainval = (cp15_domain >> domainval)&0x3;
+        domainval = (cp15_domain(mmu) >> domainval)&0x3;
         if(first_level_descriptor == 1) {
             //coarse page table, store size 1KB
-            page_table_entry = read_word_without_mmu( (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10));
+            page_table_entry = read_word_without_mmu(cpu, (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10));
         } else if(first_level_descriptor == 3) {
             //fine page table, store size 4KB
-            page_table_entry = read_word_without_mmu( (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8));
+            page_table_entry = read_word_without_mmu(cpu, (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8));
         } else {
-            printf("mmu fault\r\n");
-            exception_out();
+            WARN("mmu fault\r\n");
+            exception_out(cpu);
         }
         uint8_t second_level_descriptor = page_table_entry&3;
         if(second_level_descriptor == 0) {
             //Page translation fault
-            cp15_fsr = (domain << 4) | 0x7;
-            cp15_far = vaddr;
-            mmu_fault = 1;
+            cp15_fsr(mmu) = (domain << 4) | 0x7;
+            cp15_far(mmu) = vaddr;
+            mmu->mmu_fault = 1;
             PRINTF("Page translation fault va = 0x%x %d %d pte = 0x%x\r\n",
              vaddr, privileged, wr, page_table_entry);
-            //exception_out();
+            //exception_out(cpu);
         } else {
             if(domainval == 0) {
                 //Page domain fault
-                cp15_fsr = (domain << 4) | 0xb;
-                cp15_far = vaddr;
-                mmu_fault = 1;
-                printf("Page domain fault\r\n");
+                cp15_fsr(mmu) = (domain << 4) | 0xb;
+                cp15_far(mmu) = vaddr;
+                mmu->mmu_fault = 1;
+                WARN("Page domain fault\r\n");
                 //getchar();
             } else if(domainval == 1) {
                 //Client, Check access permissions
@@ -716,16 +298,16 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                     uint8_t subpage = (vaddr >> 14)&3;
                     subpage <<= 1;
                     ap = (page_table_entry >> (subpage+4))&0x3;
-                    if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
+                    if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
                         return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
                     } else {
                         //Sub-page permission fault
-                        cp15_fsr = (domain << 4) | 0xf;
-                        cp15_far = vaddr;
-                        mmu_fault = 1;
+                        cp15_fsr(mmu) = (domain << 4) | 0xf;
+                        cp15_far(mmu) = vaddr;
+                        mmu->mmu_fault = 1;
                         PRINTF("Large Sub-page permission fault va = 0x%x %d %d %d\r\n",
                          vaddr, ap, privileged, wr);
-                        //exception_out();
+                        //exception_out(cpu);
                     }
                 }
                 case 2:
@@ -734,31 +316,31 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                     uint8_t subpage = (vaddr >> 10)&3;
                     subpage <<= 1;
                     ap = (page_table_entry >> (subpage+4))&0x3;
-                    if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
+                    if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
                         return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
                     } else {
                         //Sub-page permission fault
-                        cp15_fsr = (domain << 4) | 0xf;
-                        cp15_far = vaddr;
-                        mmu_fault = 1;
+                        cp15_fsr(mmu) = (domain << 4) | 0xf;
+                        cp15_far(mmu) = vaddr;
+                        mmu->mmu_fault = 1;
                         PRINTF("Small Sub-page permission fault va = 0x%x %d %d %d\r\n",
                          vaddr, ap, privileged, wr);
-                        //exception_out();
+                        //exception_out(cpu);
                     }
                 }
                 case 3:
                     //tiny page, 1KB
                     ap = (page_table_entry>>4)&0x3; //ap0
-                    if(mmu_check_access_permissions(ap, privileged, wr) == 0) {
+                    if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
                         return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
                     } else {
                         //Sub-page permission fault
-                        cp15_fsr = (domain << 4) | 0xf;
-                        cp15_far = vaddr;
-                        mmu_fault = 1;
+                        cp15_fsr(mmu) = (domain << 4) | 0xf;
+                        cp15_far(mmu) = vaddr;
+                        mmu->mmu_fault = 1;
                         PRINTF("Tiny Sub-page permission fault va = 0x%x %d %d %d\r\n",
                          vaddr, ap, privileged, wr);
-                        //exception_out();
+                        //exception_out(cpu);
                     }
                 }
                 
@@ -777,7 +359,7 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
                 }
             } else {
                 printf("mmu fault\r\n");
-                exception_out();
+                exception_out(cpu);
             }
         }
     }
@@ -786,102 +368,170 @@ static inline uint32_t mmu_transfer(uint32_t vaddr, uint8_t privileged, uint8_t 
 
 /****cp15 end***********************************************************/
 
-
-//load_program_memory reads the input memory, and populates the instruction 
-// memory
-uint32_t load_program_memory(char *file_name, uint32_t start)
+/*
+ * read_mem
+ * author:hxdyxd
+ */
+uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint8_t mmu, uint8_t mask)
 {
-    FILE *fp;
-    unsigned int address, instruction;
-    fp = fopen(file_name, "rb");
-    if(fp == NULL) {
-        printf("Error opening input mem file\n");
-        exception_out();
+    if(address&mask) {
+        //Check address alignment
+        WARN("memory address alignment error 0x%x\n", address);
+        exception_out(cpu);
     }
-    address = start;
-    while(!feof(fp)) {
-        fread(&instruction, 4, 1, fp);
-        write_word(MEM, address, instruction);
-        address = address + 4;
+    
+    if(mmu) {
+        address = mmu_transfer(cpu, address, privileged, 0); //read
     }
-    printf("load mem start 0x%x, size 0x%x \r\n", start, address - start - 4);
-    fclose(fp);
-    return address - start - 4;
+    
+    if( (address>>20) ==0x400) {
+        //1M Peripheral memory
+        for(int i=0; i<cpu->peripheral.number; i++) {
+            if((address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
+                uint32_t offset = address - cpu->peripheral.link[i].prefix;
+                if(cpu->peripheral.link[i].read)
+                    return cpu->peripheral.link[i].read(cpu->peripheral.link[i].reg_base, offset);
+            }
+        }
+
+        if(address == 0x4001f030) {
+            //code counter
+            return cpu->code_counter;
+        } else if(address == MMU_EXCEPTION_ADDR) {
+            return 0xffffffff;
+        }
+    }
+    
+    if(address >= MEM_SIZE) {
+        WARN("mem overflow error, read 0x%x\r\n", address);
+        exception_out(cpu);
+    }
+    
+    return *((int*)(cpu->memory + address));
 }
 
 
-void interrupt_exception(uint8_t type)
+/*
+ * write_mem
+ * author:hxdyxd
+ */
+void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint32_t data,  uint8_t mask)
 {
-    uint32_t cpsr_int = cpsr;
-    uint32_t next_pc = register_read(15) - 4;  //lr 
+    if(address&mask) {
+        //Check address alignment
+        WARN("memory address alignment error 0x%x\n", address);
+        exception_out(cpu);
+    }
+    
+    address = mmu_transfer(cpu, address, privileged, 1); //write
+    
+    if( (address>>20) ==0x400) {
+        //1M Peripheral memory
+        for(int i=0; i<cpu->peripheral.number; i++) {
+            if((address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
+                uint32_t offset = address - cpu->peripheral.link[i].prefix;
+                if(cpu->peripheral.link[i].write)
+                    cpu->peripheral.link[i].write(cpu->peripheral.link[i].reg_base, offset, data);
+                return;
+            }
+        }
+        if(address == 0x4001f030) {
+            //ips
+            cpu->code_counter = data;
+            return;
+        } else if(address == MMU_EXCEPTION_ADDR) {
+            return;
+        }
+    }
+
+    if(address >= MEM_SIZE) {
+        WARN("mem error, write %d = 0x%0x\r\n", mask, address);
+        exception_out(cpu);
+    }
+    
+    switch(mask) {
+    case 3:
+        {    
+            int *data_p = (int *) (cpu->memory + address);
+            *data_p = data;
+        }
+        break;
+    case 1:
+        {
+            short *data_p = (short *) (cpu->memory + address);
+            *data_p = data;
+        }
+        break;
+    default:
+        {
+            char * data_p = (char *) (cpu->memory + address);
+            *data_p = data;
+        }
+        break;
+    }
+}
+
+
+void interrupt_exception(struct armv4_cpu_t *cpu, uint8_t type)
+{
+    struct mmu_t *mmu = &cpu->mmu;
+    uint32_t cpsr_int = cpsr(cpu);
+    uint32_t next_pc = register_read(cpu, 15) - 4;  //lr 
     PRINTF("[INT %d]cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri \r\n", type, cpsr_int, next_pc);
     switch(type) {
     case INT_EXCEPTION_IRQ:
         //irq
-        if(cpsr_i) {
+        if(cpsr_i(cpu)) {
             return;  //irq disable
         }
         PRINTF("IRQ\r\n");
-        register_write(15, 0x18|(cp15_ctl_v?0xffff0000:0));
-        cpsr_i_set(1);  //disable irq
-        cpsr_t_set(0);  //arm mode
-        cpsr &= ~0x1f;
-        cpsr |= CPSR_M_IRQ;
-        spsr[CPU_MODE_IRQ] = cpsr_int;  //write SPSR_irq
-        register_write(14, next_pc + 4);  //write R14_irq
+        register_write(cpu, 15, 0x18|(cp15_ctl_v(mmu)?0xffff0000:0));
+        cpsr_i_set(cpu, 1);  //disable irq
+        cpsr_t_set(cpu, 0);  //arm mode
+        cpsr(cpu) &= ~0x1f;
+        cpsr(cpu) |= CPSR_M_IRQ;
+        cpu->spsr[CPU_MODE_IRQ] = cpsr_int;  //write SPSR_irq
+        register_write(cpu, 14, next_pc + 4);  //write R14_irq
         break;
     case INT_EXCEPTION_PREABT:
         //preAbt
         PRINTF("PREABT\r\n");
-        register_write(15, 0xc|(cp15_ctl_v?0xffff0000:0));
-        cpsr_i_set(1);  //disable irq
-        cpsr_t_set(0);  //arm mode
-        cpsr &= ~0x1f;
-        cpsr |= CPSR_M_ABT;
-        spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
-        register_write(14, next_pc + 0);  //write R14_abt
+        register_write(cpu, 15, 0xc|(cp15_ctl_v(mmu)?0xffff0000:0));
+        cpsr_i_set(cpu, 1);  //disable irq
+        cpsr_t_set(cpu, 0);  //arm mode
+        cpsr(cpu) &= ~0x1f;
+        cpsr(cpu) |= CPSR_M_ABT;
+        cpu->spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
+        register_write(cpu, 14, next_pc + 0);  //write R14_abt
         break;
     case INT_EXCEPTION_SWI:
         //swi
         PRINTF("SVC\r\n");
-        register_write(15, 0x8|(cp15_ctl_v?0xffff0000:0));
-        cpsr_i_set(1);  //disable irq
-        cpsr_t_set(0);  //arm mode
-        cpsr &= ~0x1f;
-        cpsr |= CPSR_M_SVC;
-        spsr[CPU_MODE_SVC] = cpsr_int;  //write SPSR_svc
-        register_write(14, next_pc);  //write R14_svc
+        register_write(cpu, 15, 0x8|(cp15_ctl_v(mmu)?0xffff0000:0));
+        cpsr_i_set(cpu, 1);  //disable irq
+        cpsr_t_set(cpu, 0);  //arm mode
+        cpsr(cpu) &= ~0x1f;
+        cpsr(cpu) |= CPSR_M_SVC;
+        cpu->spsr[CPU_MODE_SVC] = cpsr_int;  //write SPSR_svc
+        register_write(cpu, 14, next_pc);  //write R14_svc
         break;
     case INT_EXCEPTION_DATAABT:
         //dataAbt
         PRINTF("DATAABT\r\n");
-        register_write(15, 0x10|(cp15_ctl_v?0xffff0000:0));
-        cpsr_i_set(1);  //disable irq
-        cpsr_t_set(0);  //arm mode
-        cpsr &= ~0x1f;
-        cpsr |= CPSR_M_ABT;
-        spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
-        register_write(14, next_pc + 4);  //write R14_abt
+        register_write(cpu, 15, 0x10|(cp15_ctl_v(mmu)?0xffff0000:0));
+        cpsr_i_set(cpu, 1);  //disable irq
+        cpsr_t_set(cpu, 0);  //arm mode
+        cpsr(cpu) &= ~0x1f;
+        cpsr(cpu) |= CPSR_M_ABT;
+        cpu->spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
+        register_write(cpu, 14, next_pc + 4);  //write R14_abt
         break;
     default:
-        printf("unknow interrupt\r\n");
-        exception_out();
+        WARN("unknow interrupt\r\n");
+        exception_out(cpu);
     }
 }
 
-
-void fetch(void)
-{
-    uint32_t pc = register_read(15) - 4; //current pc
-    if(((pc&3) != 0)) {
-        PRINTF("[FETCH] error, pc[0x%x] overflow \r\n", pc);
-        exception_out();
-    }
-    
-    instruction_word = read_word(MEM, pc);
-    PRINTF("[0x%04x]: ", pc);
-    register_write(15, pc + 4 ); //current pc add 4
-}
 
 #define  code_is_swi      1
 #define  code_is_b        2
@@ -908,71 +558,54 @@ void fetch(void)
 #define  code_is_unknow  255
 
 
-static unsigned char code_type = 0;
-
-static unsigned char Rn = 0;
-static unsigned char Rd = 0;
-static unsigned char Rs = 0;
-static unsigned char Rm = 0;
-static unsigned short immediate = 0;
-static signed int b_offset = 0;
-static unsigned char opcode = 0;
-static unsigned char shift = 0;
-static unsigned char rotate_imm = 0;
-static unsigned char shift_amount = 0;
-static unsigned char cond = 0;
-static unsigned char Lf = 0, Bf = 0, Uf = 0, Pf = 0, Wf = 0;
-static unsigned char Bit22 = 0, Bit20 = 0, Bit7 = 0, Bit4 = 0;
-static unsigned char Bit24_23 = 0;
-
-
-uint8_t decode(void)
+void decode(struct armv4_cpu_t *cpu)
 {
+    struct decoder_t *dec = &cpu->decoder;
     uint8_t cond_satisfy = 0;
     
-    cond = (instruction_word >> 28)&0xf;  /* bit[31:28] */
+    uint8_t cond = (dec->instruction_word >> 28)&0xf;  /* bit[31:28] */
     switch(cond) {
     case 0x0:
-        cond_satisfy = (cpsr_z == 1);
+        cond_satisfy = (cpsr_z(cpu) == 1);
         break;
     case 0x1:
-        cond_satisfy = (cpsr_z == 0);
+        cond_satisfy = (cpsr_z(cpu) == 0);
         break;
     case 0x2:
-        cond_satisfy = (cpsr_c == 1);
+        cond_satisfy = (cpsr_c(cpu) == 1);
         break;
     case 0x3:
-        cond_satisfy = (cpsr_c == 0);
+        cond_satisfy = (cpsr_c(cpu) == 0);
         break;
     case 0x4:
-        cond_satisfy = (cpsr_n == 1);
+        cond_satisfy = (cpsr_n(cpu) == 1);
         break;
     case 0x5:
-        cond_satisfy = (cpsr_n == 0);
+        cond_satisfy = (cpsr_n(cpu) == 0);
         break;
     case 0x6:
-        cond_satisfy = (cpsr_v == 1);
+        cond_satisfy = (cpsr_v(cpu) == 1);
         break;
     case 0x7:
-        cond_satisfy = (cpsr_v == 0);
+        cond_satisfy = (cpsr_v(cpu) == 0);
         break;
     case 0x8:
-        cond_satisfy = ((cpsr_c == 1) & (cpsr_z == 0));
+        cond_satisfy = ((cpsr_c(cpu) == 1) & (cpsr_z(cpu) == 0));
         break;
     case 0x9:
-        cond_satisfy = ((cpsr_c == 0) | (cpsr_z == 1));
+        cond_satisfy = ((cpsr_c(cpu) == 0) | (cpsr_z(cpu) == 1));
         break;
     case 0xa:
-        cond_satisfy = (cpsr_n == cpsr_v);
+        cond_satisfy = (cpsr_n(cpu) == cpsr_v(cpu));
         break;
     case 0xb:
-        cond_satisfy = (cpsr_n != cpsr_v);
+        cond_satisfy = (cpsr_n(cpu) != cpsr_v(cpu));
         break;
     case 0xc:
-        cond_satisfy = ((cpsr_z == 0) & (cpsr_n == cpsr_v));
+        cond_satisfy = ((cpsr_z(cpu) == 0) & (cpsr_n(cpu) == cpsr_v(cpu)));
         break;
     case 0xd:
-        cond_satisfy = ((cpsr_z == 1) | (cpsr_n != cpsr_v));
+        cond_satisfy = ((cpsr_z(cpu) == 1) | (cpsr_n(cpu) != cpsr_v(cpu)));
         break;
     case 0xe:
         cond_satisfy = 1;
@@ -986,23 +619,42 @@ uint8_t decode(void)
     
     if(!cond_satisfy) {
         //PRINTF("cond_satisfy = %d skip...\r\n", cond_satisfy);
-        return cond_satisfy;
+        return /*cond_satisfy*/;
     }
     
-    unsigned char f = 0;
-    f = (instruction_word >> 25)&0x7;  /* bit[27:25] */
-    opcode = (instruction_word >> 21)&0xf;  /* bit[24:21] */
+
+
+    uint8_t code_type;
+
+    uint8_t Rn;
+    uint8_t Rd;
+    uint8_t Rs;
+    uint8_t Rm;
+    uint16_t immediate = 0;
+    int32_t b_offset = 0;
+    uint8_t opcode;
+    uint8_t shift;
+    uint8_t rotate_imm;
+    uint8_t shift_amount;
+    uint8_t Lf = 0, Bf = 0, Uf = 0, Pf = 0, Wf = 0;
+    uint8_t Bit22, Bit20, Bit7, Bit4;
+    uint8_t Bit24_23;
+
+
+    uint8_t f = 0;
+    f = (dec->instruction_word >> 25)&0x7;  /* bit[27:25] */
+    opcode = (dec->instruction_word >> 21)&0xf;  /* bit[24:21] */
     Bit24_23 = opcode >> 2;  /* bit[24:23] */
-    Bit22 = IS_SET(instruction_word, 22);  /* bit[22] */
-    Bit20 = IS_SET(instruction_word, 20);  /* bit[20] */
-    Rn = (instruction_word >> 16)&0xf;  /* bit[19:16] */
-    Rd = (instruction_word >> 12)&0xf;  /* bit[15:12] */
-    Rs = (instruction_word >> 8)&0xf;  /* bit[11:8] */
+    Bit22 = IS_SET(dec->instruction_word, 22);  /* bit[22] */
+    Bit20 = IS_SET(dec->instruction_word, 20);  /* bit[20] */
+    Rn = (dec->instruction_word >> 16)&0xf;  /* bit[19:16] */
+    Rd = (dec->instruction_word >> 12)&0xf;  /* bit[15:12] */
+    Rs = (dec->instruction_word >> 8)&0xf;  /* bit[11:8] */
     rotate_imm = Rs;  /* bit[11:8] */
-    shift_amount = (instruction_word >> 7)&0x1f;  /* bit[11:7] */
-    shift = (instruction_word >> 5)&0x3;  /* bit[6:5] */
-    Bit4 = IS_SET(instruction_word, 4);  /* bit[4] */
-    Rm = (instruction_word&0xF);  /* bit[3:0] */
+    shift_amount = (dec->instruction_word >> 7)&0x1f;  /* bit[11:7] */
+    shift = (dec->instruction_word >> 5)&0x3;  /* bit[6:5] */
+    Bit4 = IS_SET(dec->instruction_word, 4);  /* bit[4] */
+    Rm = (dec->instruction_word&0xF);  /* bit[3:0] */
     code_type = code_is_unknow;
     
     switch(f) {
@@ -1011,8 +663,8 @@ uint8_t decode(void)
         case 0:
             if( (Bit24_23 == 2 ) && !Bit20 ) {
                 //Miscellaneous instructions
-                unsigned char Bit21 = (instruction_word&0x200000) >> 21;  /* bit[21] */
-                unsigned char Bit7 = (instruction_word&0x80) >> 7;  /* bit[7] */
+                uint8_t Bit21 = (dec->instruction_word&0x200000) >> 21;  /* bit[21] */
+                uint8_t Bit7 = (dec->instruction_word&0x80) >> 7;  /* bit[7] */
                 if(Bit21 && !Bit7) {
                     code_type = code_is_msr0;
                     PRINTF("msr0 MSR %sPSR_%d  R%d\r\n", Bit22?"S":"C", Rn, Rm);
@@ -1027,29 +679,29 @@ uint8_t decode(void)
                 //Data processing register shift by immediate
                 code_type = code_is_dp0;
                 PRINTF("dp0 %s dst register R%d, first operand R%d, Second operand R%d[0x%x] %s immediate #0x%x\r\n",
-                 opcode_table[opcode], Rd, Rn, Rm, register_read(Rm), shift_table[shift], shift_amount);
+                 opcode_table[opcode], Rd, Rn, Rm, register_read(cpu, Rm), shift_table[shift], shift_amount);
             }
             break;
         case 1:
-            Bit7 = (instruction_word&0x80) >> 7;  /* bit[7] */
+            Bit7 = (dec->instruction_word&0x80) >> 7;  /* bit[7] */
             switch(Bit7) {
             case 0:
                 if( (Bit24_23 == 2 ) && !Bit20 ) {
                     //Miscellaneous instructions
-                    if(!IS_SET(instruction_word, 22) && IS_SET(instruction_word, 21) && !IS_SET(instruction_word, 6) ) {
+                    if(!IS_SET(dec->instruction_word, 22) && IS_SET(dec->instruction_word, 21) && !IS_SET(dec->instruction_word, 6) ) {
                         //Branch/exchange
                         code_type = code_is_bx;
-                        Lf = IS_SET(instruction_word, 5); //L bit
+                        Lf = IS_SET(dec->instruction_word, 5); //L bit
                         PRINTF("bx B%sX R%d\r\n", Lf?"L":"", Rm);
-                    } else if(IS_SET(instruction_word, 6) && !IS_SET(instruction_word, 5) ) {
+                    } else if(IS_SET(dec->instruction_word, 6) && !IS_SET(dec->instruction_word, 5) ) {
                         //Enhanced DSP add/subtracts
                         code_type = code_is_unknow;
                         printf("Enhanced DSP add/subtracts R%d\r\n", Rm);
-                    } else if(IS_SET(instruction_word, 6) && IS_SET(instruction_word, 5)) {
+                    } else if(IS_SET(dec->instruction_word, 6) && IS_SET(dec->instruction_word, 5)) {
                         //Software breakpoint
                         code_type = code_is_unknow;
                         printf("Software breakpoint \r\n");
-                    } else if(!IS_SET(instruction_word, 6) && !IS_SET(instruction_word, 5) && opcode == 0xb) {
+                    } else if(!IS_SET(dec->instruction_word, 6) && !IS_SET(dec->instruction_word, 5) && opcode == 0xb) {
                         //Count leading zero
                         code_type = code_is_unknow;
                         printf("Count leading zero \r\n");
@@ -1066,16 +718,16 @@ uint8_t decode(void)
                 break;
             case 1:
                 //Multiplies, extra load/stores
-                Lf = IS_SET(instruction_word, 20); //L bit
-                Bf = IS_SET(instruction_word, 22); //B bit
-                Uf = IS_SET(instruction_word, 23);  //U bit
+                Lf = IS_SET(dec->instruction_word, 20); //L bit
+                Bf = IS_SET(dec->instruction_word, 22); //B bit
+                Uf = IS_SET(dec->instruction_word, 23);  //U bit
                 Pf = (opcode >> 3) & 1; //P bit[24]
                 Wf = opcode & 1;  //W bit[21]
                 switch(shift) {
                 case 0:
                     if(Bit24_23 == 0) {
                         code_type = code_is_mult;
-                        if( IS_SET(instruction_word, 21) ) {
+                        if( IS_SET(dec->instruction_word, 21) ) {
                             PRINTF("mult MUA%s R%d <= R%d * R%d + R%d\r\n", Bit20?"S":"", Rn, Rm, Rs, Rd);
                         } else {
                             PRINTF("mult MUL%s R%d <= R%d * R%d\r\n", Bit20?"S":"", Rn, Rm, Rs);
@@ -1083,7 +735,7 @@ uint8_t decode(void)
                     } else if(Bit24_23 == 1) {
                         code_type = code_is_multl;
                         PRINTF("multl %sM%s [R%d L, R%d H] %s= R%d * R%d\r\n", Bit22?"S":"U",
-                         IS_SET(instruction_word, 21)?"LAL":"ULL", Rd, Rn, IS_SET(instruction_word, 21)?"+":"", Rm, Rs);
+                         IS_SET(dec->instruction_word, 21)?"LAL":"ULL", Rd, Rn, IS_SET(dec->instruction_word, 21)?"+":"", Rm, Rs);
                     } else if(Bit24_23 == 2) {
                         code_type = code_is_swp;
                         PRINTF("swp \r\n");
@@ -1135,8 +787,7 @@ uint8_t decode(void)
                         }
                     }
                     if(!Lf) {
-                        printf("undefed LDRD\r\n");
-                        getchar();
+                        ERROR("undefed LDRD\r\n");
                     }
                     break;
                 case 3:
@@ -1162,37 +813,36 @@ uint8_t decode(void)
                         }
                     }
                     if(!Lf) {
-                        printf("undefed STRD\r\n");
-                        getchar();
+                        ERROR("undefed STRD\r\n");
                     }
                     break;
                 default:
                     code_type = code_is_unknow;
-                    printf("undefed shift\r\n");
+                    ERROR("undefed shift\r\n");
                 }
                 break;
             default:
                 code_type = code_is_unknow;
-                printf("undefed Bit7\r\n");
+                ERROR("undefed Bit7\r\n");
             }
             break;
         default:
             code_type = code_is_unknow;
-            printf("undefed Bit4\r\n");
+            ERROR("undefed Bit4\r\n");
         }
         break;
     case 1:
         //Data processing immediate and move immediate to status register
         if( (opcode == 0x9 || opcode == 0xb ) && !Bit20 ) {
             code_type = code_is_msr1;
-            immediate = instruction_word&0xff;
+            immediate = dec->instruction_word&0xff;
             PRINTF("msr1 MSR %sPSR_%d  immediate [#%d ROR %d]\r\n", Bit22?"S":"C", Rn, immediate, rotate_imm*2);
         } else if( (opcode == 0x8 || opcode == 0xa ) && !Bit20 ) {
             PRINTF("undefined instruction\r\n");
         } else {
             //Data processing immediate
             code_type = code_is_dp2;
-            immediate = instruction_word&0xff;
+            immediate = dec->instruction_word&0xff;
             PRINTF("dp2 %s dst register R%d, first operand R%d, Second operand immediate [#%d ROR %d]\r\n",
              opcode_table[opcode], Rd, Rn, immediate, rotate_imm*2);
         }
@@ -1200,10 +850,10 @@ uint8_t decode(void)
     case 2:
         //load/store immediate offset
         code_type = code_is_ldr0;
-        immediate = instruction_word&0xFFF;
-        Lf = IS_SET(instruction_word, 20); //L bit
-        Bf = IS_SET(instruction_word, 22); //B bit
-        Uf = IS_SET(instruction_word, 23); //U bit
+        immediate = dec->instruction_word&0xFFF;
+        Lf = IS_SET(dec->instruction_word, 20); //L bit
+        Bf = IS_SET(dec->instruction_word, 22); //B bit
+        Uf = IS_SET(dec->instruction_word, 23); //U bit
         Pf = (opcode >> 3) & 1; //P bit[24]
         Wf = opcode & 1;  //W bit[21]
         if(Pf) {
@@ -1219,14 +869,14 @@ uint8_t decode(void)
         //load/store register offset
         if(!Bit4) {
             code_type = code_is_ldr1;
-            Lf = IS_SET(instruction_word, 20); //L bit
-            Bf = IS_SET(instruction_word, 22); //B bit
-            Uf = IS_SET(instruction_word, 23); //U bit
+            Lf = IS_SET(dec->instruction_word, 20); //L bit
+            Bf = IS_SET(dec->instruction_word, 22); //B bit
+            Uf = IS_SET(dec->instruction_word, 23); //U bit
             Pf = (opcode >> 3) & 1; //P bit[24]
             Wf = opcode & 1;  //W bit[21]
             if(Pf) {
                 PRINTF("ldr1 %s%s dst register R%d, [base address at R%d, offset address at %s[R%d(0x%x) %s %d]] %s\r\n",
-                 Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, register_read(Rm), shift_table[shift], shift_amount, Wf?"!":"");
+                 Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, register_read(cpu, Rm), shift_table[shift], shift_amount, Wf?"!":"");
             } else {
                 PRINTF("ldr1 %s%s dst register R%d, [base address at R%d], offset address at %s[R%d %s %d] \r\n",
                  Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, shift_table[shift], shift_amount);
@@ -1240,37 +890,37 @@ uint8_t decode(void)
     case 4:
         //load/store multiple
         code_type = code_is_ldm;
-        Lf = IS_SET(instruction_word, 20); //L bit
-        Uf = IS_SET(instruction_word, 23);  //U bit
+        Lf = IS_SET(dec->instruction_word, 20); //L bit
+        Uf = IS_SET(dec->instruction_word, 23);  //U bit
         Pf = opcode >> 3;  //P bit
         Wf = opcode & 1;
         PRINTF("ldm %s%s%s R%d%s \r\n", Lf?"LDM":"STM", Uf?"I":"D", Pf?"B":"A",  Rn, Wf?"!":"");
-        Rn = (instruction_word >> 16)&0xf;
+        Rn = (dec->instruction_word >> 16)&0xf;
         break;
     case 5:
         //branch
         code_type = code_is_b;
-        if( (instruction_word&0xFFFFFF) >> 23) {
+        if( (dec->instruction_word&0xFFFFFF) >> 23) {
             //-
-            b_offset = (instruction_word&0x7FFFFF)|0xFF800000;
+            b_offset = (dec->instruction_word&0x7FFFFF)|0xFF800000;
         } else {
             //+
-            b_offset = instruction_word&0x7FFFFF;
+            b_offset = dec->instruction_word&0x7FFFFF;
         }
         b_offset <<= 2;
-        Lf = IS_SET(instruction_word, 24); //L bit
+        Lf = IS_SET(dec->instruction_word, 24); //L bit
         PRINTF("B%s PC[0x%x] +  0x%08x = 0x%x\r\n",
-         Lf?"L":"", register_read(15), b_offset, register_read(15) + b_offset );
+         Lf?"L":"", register_read(cpu, 15), b_offset, register_read(cpu, 15) + b_offset );
         break;
     case 6:
         //Coprocessor load/store and double register transfers
         code_type = code_is_unknow;
         printf("Coprocessor todo... \r\n");
-        exception_out();
+        exception_out(cpu);
         break;
     case 7:
         //software interrupt
-        if(IS_SET(instruction_word, 24)) {
+        if(IS_SET(dec->instruction_word, 24)) {
             code_type = code_is_swi;
             PRINTF("swi \r\n");
         } else {
@@ -1280,34 +930,31 @@ uint8_t decode(void)
                 PRINTF("mcr \r\n");
             } else {
                 printf("Coprocessor data processing todo... \r\n");
-                exception_out();
+                exception_out(cpu);
             }
         }
         break;
     default:
         code_type = code_is_unknow;
         printf("undefed\r\n");
-        exception_out();
+        exception_out(cpu);
     }
-    return cond_satisfy;
-}
 
-
-static uint8_t swi_flag = 0;
-
-void execute(void)
-{
-    uint32_t operand1 = register_read(Rn);
-    uint32_t operand2 = register_read(Rm);
-    uint32_t rot_num = register_read(Rs);
-    unsigned char add_flag = 1;
+    //return cond_satisfy;
+    //----------------------------------------------------------------------------------------------------------
+    //----------------------------------------------------------------------------------------------------------
+    //execute
+    uint32_t operand1 = register_read(cpu, Rn);
+    uint32_t operand2 = register_read(cpu, Rm);
+    uint32_t rot_num = register_read(cpu, Rs);
+    uint8_t add_flag = 1;
     /*
      * 0: turn off shifter
      * 3: PD(is) On
      * 4: DP(rs) On
      * 5: DP(i) On
     */
-    unsigned char shifter_flag = 0;
+    uint8_t shifter_flag = 0;
     uint32_t carry = 0;
     
     switch(code_type) {
@@ -1320,7 +967,7 @@ void execute(void)
         break;
     case code_is_b:
         operand1 = b_offset;
-        operand2 = register_read(15);
+        operand2 = register_read(cpu, 15);
         rot_num = 0;
         shifter_flag = 0;  //no need to use shift
         break;
@@ -1400,28 +1047,28 @@ void execute(void)
             }
             
             if(opcode&1) {
-                multl_long += ( ((uint64_t)register_read(Rn) << 32) | register_read(Rd));
+                multl_long += ( ((uint64_t)register_read(cpu, Rn) << 32) | register_read(cpu, Rd));
             }
             
-            register_write(Rn, multl_long >> 32);
-            register_write(Rd, multl_long&0xffffffff);
-            PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n", register_read(Rn), Rn, register_read(Rd), Rd, operand2, rot_num);
+            register_write(cpu, Rn, multl_long >> 32);
+            register_write(cpu, Rd, multl_long&0xffffffff);
+            PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n", register_read(cpu, Rn), Rn, register_read(cpu, Rd), Rd, operand2, rot_num);
             
             if(Bit20) {
                 //Update CPSR register
                 uint8_t out_sign = IS_SET(multl_long, 63);
                 
-                cpsr_n_set(out_sign);
-                cpsr_z_set(multl_long == 0);
+                cpsr_n_set(cpu, out_sign);
+                cpsr_z_set(cpu, multl_long == 0);
                 //cv unaffected
-                PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+                PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
             }
             
             return;
         }while(0);
         break;
     case code_is_swi:
-        swi_flag = 1;
+        dec->swi_flag = 1;
         return;
         break;
     case code_is_mrs:
@@ -1430,7 +1077,7 @@ void execute(void)
     case code_is_mcr:
         do{
             shifter_flag = 0;  //no need to use shift
-            uint8_t op2 = (instruction_word >> 5)&0x7;
+            uint8_t op2 = (dec->instruction_word >> 5)&0x7;
             //  cp_num       Rs
             //  register     Rd
             //  cp_register  Rn
@@ -1439,7 +1086,7 @@ void execute(void)
                 if(Rs == 15) {
                     uint32_t cp15_val;
                     if(Rn) {
-                        cp15_val = cp15_read(Rn);
+                        cp15_val = cp15_read(&cpu->mmu, Rn);
                     } else {
                         //register 0
                         if(op2) {
@@ -1451,7 +1098,7 @@ void execute(void)
                             cp15_val = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5;
                         }
                     }
-                    register_write(Rd, cp15_val);
+                    register_write(cpu, Rd, cp15_val);
                     PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, Rn, cp15_val, op2, Rd);
                 } else {
                     printf("read cp%d_c%d \r\n", Rs, Rn);
@@ -1459,9 +1106,9 @@ void execute(void)
                 }
             } else {
                 //mcr
-                uint32_t register_val = register_read(Rd);
+                uint32_t register_val = register_read(cpu, Rd);
                 if(Rs == 15) {
-                    cp15_write(Rn, register_val);
+                    cp15_write(&cpu->mmu, Rn, register_val);
                     PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, Rs, Rn);
                 } else {
                     printf("write to cp%d_c%d \r\n", Rs, Rn);
@@ -1480,12 +1127,12 @@ void execute(void)
             /* op1, Rn
              * op2, Rm
              */
-            uint32_t tmp = read_word(MEM, operand1);
-            if(mmu_check_status()) {
+            uint32_t tmp = read_word(cpu, operand1);
+            if(mmu_check_status(&cpu->mmu)) {
                 return;
             }
-            write_word(MEM, operand1, operand2);
-            register_write(Rd, tmp);
+            write_word(cpu, operand1, operand2);
+            register_write(cpu, Rd, tmp);
             
             return;
         }while(0);
@@ -1506,7 +1153,7 @@ void execute(void)
             if(shifter_flag == 3) {
                 //PD(is) On
                 if(rot_num == 0) {
-                    shifter_carry_out = cpsr_c;
+                    shifter_carry_out = cpsr_c(cpu);
                 } else {
                     shifter_carry_out = IS_SET(operand2, 32 - rot_num);
                     operand2 = operand2 << rot_num;
@@ -1514,7 +1161,7 @@ void execute(void)
             } else if(shifter_flag == 4) {
                 //DP(rs) On
                 if((rot_num&0xff) == 0) {
-                    shifter_carry_out = cpsr_c;
+                    shifter_carry_out = cpsr_c(cpu);
                 } else if((rot_num&0xff) < 32) {
                     shifter_carry_out = IS_SET(operand2, 32 - rot_num);
                     operand2 = operand2 << rot_num;
@@ -1542,7 +1189,7 @@ void execute(void)
             } else if(shifter_flag == 4) {
                 //DP(rs) On
                 if((rot_num&0xff) == 0) {
-                    shifter_carry_out = cpsr_c;
+                    shifter_carry_out = cpsr_c(cpu);
                 } else if((rot_num&0xff) < 32) {
                     shifter_carry_out = IS_SET(operand2, rot_num-1);
                     operand2 = operand2 >> rot_num;
@@ -1574,7 +1221,7 @@ void execute(void)
             } else if(shifter_flag == 4) {
                 //DP(rs) On
                 if((rot_num&0xff) == 0) {
-                    shifter_carry_out = cpsr_c;
+                    shifter_carry_out = cpsr_c(cpu);
                 } else if((rot_num&0xff) < 32) {
                     shifter_carry_out = IS_SET(operand2, rot_num-1);
                     operand2 = (int32_t)operand2 >> rot_num;
@@ -1596,7 +1243,7 @@ void execute(void)
                 //DP(i)
                 operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
                 if(rot_num == 0) {
-                     shifter_carry_out = cpsr_c;
+                     shifter_carry_out = cpsr_c(cpu);
                 } else {
                     shifter_carry_out = IS_SET(operand2, 31);
                 }   
@@ -1605,7 +1252,7 @@ void execute(void)
                 if(rot_num == 0) {
                     //RRX
                     shifter_carry_out = operand2&1;
-                    operand2 = (cpsr_c << 31) | (operand2 >> 1);
+                    operand2 = (cpsr_c(cpu) << 31) | (operand2 >> 1);
                 } else {
                     //ROR
                     shifter_carry_out = IS_SET(operand2, rot_num-1);
@@ -1614,7 +1261,7 @@ void execute(void)
             } else if(shifter_flag == 4) {
                 //DP(rs) ROR On
                 if((rot_num&0xff) == 0) {
-                    shifter_carry_out = cpsr_c;
+                    shifter_carry_out = cpsr_c(cpu);
                 } else if((rot_num&0x1f) == 0) {
                     shifter_carry_out = IS_SET(operand2, 31);
                 } else /* rot_num > 0 */ {
@@ -1667,16 +1314,16 @@ void execute(void)
             break;
         case 5:
             //ADC
-            carry = cpsr_c;  //todo...
+            carry = cpsr_c(cpu);  //todo...
             break;
         case 6:
             //SBC
-            carry = !cpsr_c;  //todo...
+            carry = !cpsr_c(cpu);  //todo...
             add_flag = 0;
             break;
         case 7:
             //RSC
-            carry = !cpsr_c;  //todo...
+            carry = !cpsr_c(cpu);  //todo...
             uint32_t tmp = operand1;
             operand1 = operand2;
             operand2 = tmp;
@@ -1721,7 +1368,7 @@ void execute(void)
     case code_is_mult:
         switch(opcode) {
         case 1:
-            operand1 = register_read(Rd);  //Rd and Rn swap, !!!
+            operand1 = register_read(cpu, Rd);  //Rd and Rn swap, !!!
             break;
         case 0:
             operand1 = 0;
@@ -1748,55 +1395,55 @@ void execute(void)
         if(Bit24_23 == 2) {
             PRINTF("update flag only \r\n");
         } else {
-            register_write(Rd, aluout);
+            register_write(cpu, Rd, aluout);
             PRINTF("write register R%d = 0x%x\r\n", Rd, aluout);
         }
         if(Bit20) {
             //Update CPSR register
             uint8_t out_sign = IS_SET(aluout, 31);
             
-            cpsr_n_set(out_sign);
-            cpsr_z_set(aluout == 0);
+            cpsr_n_set(cpu, out_sign);
+            cpsr_z_set(cpu, aluout == 0);
             
             uint8_t bit_cy = (cy_high_bits>>1)&1;
             uint8_t bit_ov = (bit_cy^IS_SET(sum_middle, 31))&1;
             
             if(opcode == 11 || opcode == 4 || opcode == 5) {
                 //CMN, ADD, ADC
-                cpsr_c_set( bit_cy );
-                cpsr_v_set( bit_ov );
+                cpsr_c_set(cpu, bit_cy );
+                cpsr_v_set(cpu, bit_ov );
             } else if(opcode == 10 || opcode == 2 || opcode == 6 || opcode == 3 || opcode == 7) {
                 //CMP, SUB, SBC, RSB, RSC
-                cpsr_c_set( !bit_cy );
-                cpsr_v_set( bit_ov );
+                cpsr_c_set(cpu, !bit_cy );
+                cpsr_v_set(cpu, bit_ov );
             } else if(shifter_flag) {
                 //TST, TEQ, ORR, MOV, MVN
-                cpsr_c_set( shifter_carry_out );
+                cpsr_c_set(cpu, shifter_carry_out );
                 //c shifter_carry_out
                 //v unaffected
             }
             
-            PRINTF("[DP] update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+            PRINTF("[DP] update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
             
             if(Rd == 15 && Bit24_23 != 2) {
-                uint8_t cpu_mode = get_cpu_mode_code();
-                cpsr = spsr[cpu_mode];
-                PRINTF("[DP] cpsr 0x%x copy from spsr %d \r\n", cpsr, cpu_mode);
+                uint8_t cpu_mode = get_cpu_mode_code(cpu);
+                cpsr(cpu) = cpu->spsr[cpu_mode];
+                PRINTF("[DP] cpsr 0x%x copy from spsr %d \r\n", cpsr(cpu), cpu_mode);
             }
         }
         break;
     case code_is_bx:
     case code_is_b:
         if(Lf) {
-            register_write(14, register_read(15) - 4);  //LR register
-            PRINTF("write register R%d = 0x%0x, ", 14, register_read(14));
+            register_write(cpu, 14, register_read(cpu, 15) - 4);  //LR register
+            PRINTF("write register R%d = 0x%0x, ", 14, register_read(cpu, 14));
         }
         
         if(aluout&3) {
             printf("thumb unsupport \r\n");
             getchar();
         }
-        register_write(15, aluout & 0xfffffffc);  //PC register
+        register_write(cpu, 15, aluout & 0xfffffffc);  //PC register
         PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
         break;
     case code_is_ldr0:
@@ -1815,76 +1462,76 @@ void execute(void)
             address = aluout;  //aluout
         }
         
-        uint32_t tmpcpsr = cpsr;
+        uint32_t tmpcpsr = cpsr(cpu);
         if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
             //LDRT as user mode
-            cpsr &= 0x1f;
-            cpsr |= CPSR_M_USR;
+            cpsr(cpu) &= 0x1f;
+            cpsr(cpu) |= CPSR_M_USR;
         }
         
         if(Lf) {
             //LDR
             if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
                 //Halfword
-                data = read_halfword(MEM, address);
+                data = read_halfword(cpu, address);
             } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
                 //Halfword Signed
-                data = read_halfword(MEM, address);
+                data = read_halfword(cpu, address);
                 if(data&0x8000) {
                     data |= 0xffff0000;
                 }
             } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
                 //Byte Signed
-                data = read_byte(MEM, address);
+                data = read_byte(cpu, address);
                 if(data&0x80) {
                     data |= 0xffffff00;
                 }
             } else if(Bf) {
                 //Byte
-                data = read_byte(MEM, address);
+                data = read_byte(cpu, address);
             } else {
                 //Word
                 if((address&0x3) != 0) {
                     printf("ldr unsupported address = 0x%x\n", address);
                     getchar();
                 }
-                data = read_word(MEM, address);
+                data = read_word(cpu, address);
             }
             
-            if(mmu_check_status()) {
+            if(mmu_check_status(&cpu->mmu)) {
                 if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
                     //LDRT restore cpsr
-                    cpsr = tmpcpsr;
+                    cpsr(cpu) = tmpcpsr;
                 }
                 return;
             }
-            register_write(Rd, data);
-            PRINTF("load data [0x%x]:0x%x to R%d \r\n", address, register_read(Rd), Rd);
+            register_write(cpu, Rd, data);
+            PRINTF("load data [0x%x]:0x%x to R%d \r\n", address, register_read(cpu, Rd), Rd);
         } else {
             //STR
-            data = register_read(Rd);
+            data = register_read(cpu, Rd);
             if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
                 //Halfword
-                write_halfword(MEM, address, data);
+                write_halfword(cpu, address, data);
             } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
                 //Halfword Signed ?
-                write_halfword(MEM, address, data);
+                write_halfword(cpu, address, data);
                 printf("STRSH ? \r\n");
-                exception_out();
+                exception_out(cpu);
             } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
                 //Byte Signed ?
-                write_byte(MEM, address, data);
+                write_byte(cpu, address, data);
                 printf("STRSB ? \r\n");
-                exception_out();
+                exception_out(cpu);
             } else if(Bf) {
-                write_byte(MEM, address, data);
+                write_byte(cpu, address, data);
             } else {
-                write_word(MEM, address, data);
+                write_word(cpu, address, data);
             }
-            if(mmu_check_status()) {
+            if(mmu_check_status(&cpu->mmu)) {
                 if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
                     //LDRT restore cpsr
-                    cpsr = tmpcpsr;
+                    cpsr(cpu) = tmpcpsr;
                 }
                 return;
             }
@@ -1892,13 +1539,13 @@ void execute(void)
         }
         if(!(!Wf && Pf)) {
             //Update base register
-            register_write(Rn, aluout);
+            register_write(cpu, Rn, aluout);
             PRINTF("[LDR]write register R%d = 0x%x\r\n", Rn, aluout);
         }
         
         if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
             //LDRT restore cpsr
-            cpsr = tmpcpsr;
+            cpsr(cpu) = tmpcpsr;
         }
     }
         break;
@@ -1906,7 +1553,7 @@ void execute(void)
         if(Lf) { //bit [20]
             //LDM
             uint8_t ldm_type = 0;
-            if(Bit22 && !IS_SET(instruction_word, 15)) {
+            if(Bit22 && !IS_SET(dec->instruction_word, 15)) {
                 //LDM(2)
                 ldm_type = 1;
             }
@@ -1915,13 +1562,13 @@ void execute(void)
             uint32_t address = operand1;
             for(int i=0; i<16; i++) {
                 int n = (Uf)?i:(15-i);
-                if(IS_SET(instruction_word, n)) {
+                if(IS_SET(dec->instruction_word, n)) {
                     if(Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
                     }
-                    uint32_t data = read_word(MEM, address);
-                    if(mmu_check_status()) {
+                    uint32_t data = read_word(cpu, address);
+                    if(mmu_check_status(&cpu->mmu)) {
                         return;
                     }
                     if(n == 15) {
@@ -1932,10 +1579,10 @@ void execute(void)
                     }
                     if(ldm_type) {
                         //LDM(2)
-                        register_write_user_mode(n, data);
+                        register_write_user_mode(cpu, n, data);
                     } else {
                         //LDM(1)
-                        register_write(n, data);
+                        register_write(cpu, n, data);
                     }
                     
                     PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, data, n);
@@ -1947,15 +1594,15 @@ void execute(void)
             }
             
             if(Wf) {  //bit[21] W
-                register_write(Rn, address);
+                register_write(cpu, Rn, address);
                 PRINTF("[LDM] write R%d = 0x%0x \r\n", Rn, address);
             }
             
             if(pc_include_flag) {
                 //LDM(3) copy spsr to cpsr
-                uint8_t cpu_mode = get_cpu_mode_code();
-                cpsr = spsr[cpu_mode];
-                PRINTF("ldm(3) cpsr 0x%x copy from spsr %d\r\n", cpsr, cpu_mode);
+                uint8_t cpu_mode = get_cpu_mode_code(cpu);
+                cpsr(cpu) = cpu->spsr[cpu_mode];
+                PRINTF("ldm(3) cpsr 0x%x copy from spsr %d\r\n", cpsr(cpu), cpu_mode);
             }
             
         } else {
@@ -1968,21 +1615,21 @@ void execute(void)
             uint32_t address = operand1;
             for(int i=0; i<16; i++) {
                 int n = (Uf)?i:(15-i);
-                if(IS_SET(instruction_word, n)) {
+                if(IS_SET(dec->instruction_word, n)) {
                     if(Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
                     }
                     if(stm_type) {
                         //STM(2)
-                        write_word(MEM, address, register_read_user_mode(n));
+                        write_word(cpu, address, register_read_user_mode(cpu, n));
                     } else {
                         //STM(1)
-                        write_word(MEM, address, register_read(n));
+                        write_word(cpu, address, register_read(cpu, n));
                     }
                     
-                    PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", n, register_read(n), address);
-                    if(mmu_check_status()) {
+                    PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", n, register_read(cpu, n), address);
+                    if(mmu_check_status(&cpu->mmu)) {
                         return;
                     }
                     
@@ -1994,7 +1641,7 @@ void execute(void)
             }
             
             if(Wf) {  //bit[21] W
-                register_write(Rn, address);
+                register_write(cpu, Rn, address);
                 PRINTF("[STM] write R%d = 0x%0x \r\n", Rn, address);
             }
         }
@@ -2006,236 +1653,130 @@ void execute(void)
         if(!Bit22) {
             //write cpsr
             cpu_mode = 0;
-            if(cpsr_m == CPSR_M_USR && (Rn&0x7) ) {
+            if(cpsr_m(cpu) == CPSR_M_USR && (Rn&0x7) ) {
                 printf("[MSR] cpu is user mode, flags field can write only\r\n");
-                exception_out();
+                exception_out(cpu);
             }
         } else {
             //write spsr
-            cpu_mode = get_cpu_mode_code();
+            cpu_mode = get_cpu_mode_code(cpu);
             if(cpu_mode == 0) {
                 printf("[MSR] user mode has not spsr\r\n");
-                exception_out();
+                exception_out(cpu);
             }
         }
         if(IS_SET(Rn, 0) ) {
-            spsr[cpu_mode] &= 0xffffff00;
-            spsr[cpu_mode] |= aluout&0xff;
+            cpu->spsr[cpu_mode] &= 0xffffff00;
+            cpu->spsr[cpu_mode] |= aluout&0xff;
         }
         if(IS_SET(Rn, 1) ) {
-            spsr[cpu_mode] &= 0xffff00ff;
-            spsr[cpu_mode] |= aluout&0xff00;
+            cpu->spsr[cpu_mode] &= 0xffff00ff;
+            cpu->spsr[cpu_mode] |= aluout&0xff00;
         }
         if(IS_SET(Rn, 2) ) {
-            spsr[cpu_mode] &= 0xff00ffff;
-            spsr[cpu_mode] |= aluout&0xff0000;
+            cpu->spsr[cpu_mode] &= 0xff00ffff;
+            cpu->spsr[cpu_mode] |= aluout&0xff0000;
         }
         if(IS_SET(Rn, 3) ) {
-            spsr[cpu_mode] &= 0x00ffffff;
-            spsr[cpu_mode] |= aluout&0xff000000;
+            cpu->spsr[cpu_mode] &= 0x00ffffff;
+            cpu->spsr[cpu_mode] |= aluout&0xff000000;
         }
-        PRINTF("write register spsr_%d = 0x%x\r\n", cpu_mode, spsr[cpu_mode]);
+        PRINTF("write register spsr_%d = 0x%x\r\n", cpu_mode, cpu->spsr[cpu_mode]);
     }
         break;
     case code_is_mult:
-        register_write(Rn, aluout);   //Rd and Rn swap, !!!
+        register_write(cpu, Rn, aluout);   //Rd and Rn swap, !!!
         PRINTF("[MULT] write register R%d = 0x%x\r\n", Rn, aluout);
         
         if(Bit20) {
             //Update CPSR register
             uint8_t out_sign = IS_SET(aluout, 31);
             
-            cpsr_n_set(out_sign);
-            cpsr_z_set(aluout == 0);
+            cpsr_n_set(cpu, out_sign);
+            cpsr_z_set(cpu, aluout == 0);
             //cv unaffected
-            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n, cpsr_z, cpsr_c, cpsr_v);
+            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
         }
         break;
     case code_is_mrs:
         if(Bit22) {
-            uint8_t mode = get_cpu_mode_code();
-            register_write(Rd, spsr[mode]);
-            PRINTF("write register R%d = [spsr]0x%x\r\n", Rd, spsr[mode]);
+            uint8_t mode = get_cpu_mode_code(cpu);
+            register_write(cpu, Rd, cpu->spsr[mode]);
+            PRINTF("write register R%d = [spsr]0x%x\r\n", Rd, cpu->spsr[mode]);
         } else {
-            register_write(Rd, cpsr);
-            PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr);
+            register_write(cpu, Rd, cpsr(cpu));
+            PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr(cpu));
         }
         break;
     default:
-        printf("unsupport code %d\r\n", code_type );
-        getchar();
+        ERROR("unsupport code %d\r\n", code_type );
         break;
     }
 }
 
 
-// it is used to set the reset values
-//reset all registers and memory content to 0
-void reset_proc(void)
+
+
+
+void cpu_init(struct armv4_cpu_t *cpu)
 {
-    int i;
-    cpsr = CPSR_M_SVC;
-    cpsr_i_set(1);  //disable irq
-    cpsr_f_set(1);  //disable fiq
-    cp15_reset();
-    int_reset();
-    tim_reset();
-    uart_8250_reset();
-    for(i=0; i<16; i++) {
-        register_write(i, 0);
-    }
-    code_counter = 0;
+    memset(cpu, 0, sizeof(struct armv4_cpu_t));
+    cpsr(cpu) = CPSR_M_SVC;
+    cpsr_i_set(cpu, 1);  //disable irq
+    cpsr_f_set(cpu, 1);  //disable fiq
+    cp15_reset(&cpu->mmu);
 }
 
-#if 0
-uint32_t inc_counter[23];
-
-void list_inc_counter(void)
+void fetch(struct armv4_cpu_t *cpu)
 {
-    for(int i=0; i<23; i++) {
-        printf("code %d counter %d\n", i, inc_counter[i]);
-    }
-}
-#endif
-
-#define IMAGE_LOAD_ADDRESS   (0x8000)
-#define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
-
-
-int main(int argc, char **argv)
-{
-    char *path = "./arm_linux/Image";
-    char *dtb_path = "./arm_linux/arm-emulator.dtb";
-    
-    //kips_speed，Avoid system call frequently
-    uint32_t kips_speed = 40000; //per 10ms
-    if(argc > 1) {
-        kips_speed = atoi(argv[1]);
-    }
-    printf("KIPS_SPEED = %d\n", kips_speed);
-    
-    /* cpu reset */
-    reset_proc();
-    
-    /* Load firmware to memory */
-    load_program_memory(path, IMAGE_LOAD_ADDRESS);
-    load_program_memory(dtb_path, DTB_BASE_ADDRESS);
-    
-    /* linux environment, Kernel boot conditions */
-    register_write(1, 0xffffffff);         //set r1
-    register_write(2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
-    register_write(15, IMAGE_LOAD_ADDRESS);            //set pc, jump to Load Address
-    
-    while(1) {
-        code_counter++;
-#if 0
-        //Debug code
-        uint32_t pc = register_read(15) - 4;
-        if(pc <= 0x10250 &&  pc >= 0x10210  &&  cp15_ctl_m) {
-            abort_test = 1;
-            printf("pc = 0x%x, debug\n", pc);
-        }
-#endif
-        
-        fetch();
-        if(mmu_check_status()) {
-            //check fetch instruction_word fault
-            interrupt_exception(INT_EXCEPTION_PREABT);
-            mmu_fault = 0;
-#if 0
-            //Debug fetch fault
-            printf("-------preAbt cp15_far %x-------\n", cp15_far);
-            exception_out();
-#endif
-            continue;
-        }
-        
-        if(!decode()) {
-            continue;
-        }
-#if 0
-        //Debug Frequency of each instructions
-        if(code_type < 23) {
-            inc_counter[code_type]++;
-        }
-#endif
-        
-        execute();
-        
-        if(swi_flag) {
-            swi_flag = 0;
-#if 0
-            //Debug system call number for linux kernel
-            uint32_t call_number = register_read(7);
-            printf(" swi r7 = %d\n", call_number);
-#endif
-            interrupt_exception(INT_EXCEPTION_SWI);
-        } else if(mmu_check_status()) {
-            //check memory data fault
-            interrupt_exception(INT_EXCEPTION_DATAABT);
-            mmu_fault = 0;
-#if 0
-            //Debug data fault
-            printf("-------code is %d, cp15_far %x------\n", code_type, cp15_far);
-            exception_out();
-#endif
-        } else if(TIM.EN && !cpsr_i && code_counter%kips_speed == 0 ) {
-            //timer enable, int_controler enable, cpsr_irq not disable
-            //per 10 millisecond timer irq
-            //kips_speed：Avoid calling GET_TICK functions frequently
-            static uint32_t tick_timer = 0;
-            uint32_t new_tick_timer = GET_TICK();
-            if(new_tick_timer - tick_timer >= 10) {
-#if 0
-                //Debug instructions per 10ms, kips_speed should be less than this value
-                static uint32_t code_counter_tmp = 0, slow_count = 0;
-                if(slow_count++ >= 100) {
-                    slow_count = 0;
-                    printf("i/10ms,%d\n", code_counter - code_counter_tmp);
-                }
-                code_counter_tmp = code_counter;
-#endif
-                tick_timer = new_tick_timer;
-                interrupt_happen(0);
-            }
-        } else if( (UART[0].IER&0xf) && !cpsr_i  ) {
-            //uart enable, cpsr_irq not disable
-            //UART
-            if( (UART[0].IER&0x2) ) {
-                //Bit1, Enable Transmit Holding Register Empty Interrupt. 
-                if(interrupt_happen(1)) {
-                    UART[0].IIR = 0x2; // THR empty
-                }
-            } else  if( (UART[0].IER&0x1) && code_counter%kips_speed == (kips_speed/2) && KBHIT() ) {
-                //Avoid calling kbhit functions frequently
-                //Bit0, Enable Received Data Available Interrupt. 
-                if( interrupt_happen(1) ) {
-                    UART[0].IIR = 0x4; //received data available
-                    register_set(UART[0].LSR, 0, 1);
-                }
-            } else {
-                UART[0].IIR = 1; //no interrupt pending
-            }
-        }
-        
-#if DEBUG
-        if(getchar() == 'c') {
-            exception_out();
-            getchar();
-        }
-#endif
-#if 0
-        //Debug code
-        if(abort_test) {
-            exception_out();
-            abort_test = 0;
-        }
-#endif
+    uint32_t pc = register_read(cpu, 15) - 4; //current pc
+    if(((pc&3) != 0)) {
+        PRINTF("[FETCH] error, pc[0x%x] overflow \r\n", pc);
+        exception_out(cpu);
     }
     
-    printf("\r\n---------------test code -----------\r\n");
-    
-    return 0;
+    cpu->decoder.instruction_word = read_word(cpu, pc);
+    PRINTF("[0x%04x]: ", pc);
+    register_write(cpu, 15, pc + 4 ); //current pc add 4
 }
 
+
+/*
+ * exception_out
+ * author:hxdyxd
+ */
+void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link, int number)
+{
+    cpu->peripheral.link = link;
+    cpu->peripheral.number = number;
+    for(int i=0; i<cpu->peripheral.number; i++) {
+        WARN("[%d]Peripheral register at 0x%08x: ", i, cpu->peripheral.link[i].prefix);
+        if(cpu->peripheral.link[i].reset) {
+            cpu->peripheral.link[i].reset(cpu->peripheral.link[i].reg_base);
+            WARN("ok!");
+        }
+        WARN("\n");
+    }
+}
+
+//load_program_memory reads the input memory, and populates the instruction 
+// memory
+uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uint32_t start)
+{
+    FILE *fp;
+    unsigned int address, instruction;
+    fp = fopen(file_name, "rb");
+    if(fp == NULL) {
+        ERROR("Error opening input mem file\n");
+    }
+    address = start;
+    while(!feof(fp)) {
+        fread(&instruction, 4, 1, fp);
+        write_word(cpu, address, instruction);
+        address = address + 4;
+    }
+    WARN("load mem start 0x%x, size 0x%x \r\n", start, address - start - 4);
+    fclose(fp);
+    return address - start - 4;
+}
 /*****************************END OF FILE***************************/
