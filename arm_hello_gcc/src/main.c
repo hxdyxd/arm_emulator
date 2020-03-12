@@ -7,7 +7,7 @@
 
 #define CONFIG_MS    (10)
 //uart
-#define SERIAL_THR   *(volatile unsigned char *) (0x40020000)
+#define SERIAL_THR   *(volatile unsigned char *) (0x4001f004)
 
 #define INT_MSK   *(volatile unsigned int *) (0x4001f040)
 #define INT_PND   *(volatile unsigned int *) (0x4001f044)
@@ -48,7 +48,7 @@ void handle_irq(void)
         putchar(SERIAL_THR);
         INT_PND &= ~(1<<1);
     }
-    //putchar('i');
+//    putchar('i');
 }
 
 void handle_swi(int number)
@@ -57,7 +57,7 @@ void handle_swi(int number)
 }
 
 
-void led_timer_proc(void)
+void test_timer_proc(void)
 {
     static uint32_t last_code_counter = 0;
     uint32_t code_counter =  CODE_COUNTER;
@@ -65,9 +65,9 @@ void led_timer_proc(void)
     printf("--------------------------------[ARM9]--------------------------\r\n");
     static uint32_t last_time = 0;
 
-    printf("[%lld] rate = %.3f KIPS \r\n", 
+    printf("[%lld] rate = %.3f MIPS \r\n", 
         (uint64_t)TIMER_TASK_GET_TICK_COUNT(),
-        (code_counter - last_code_counter)*1.0/(TIMER_TASK_GET_TICK_COUNT() - last_time)
+        (code_counter - last_code_counter)/1000.0/(TIMER_TASK_GET_TICK_COUNT() - last_time)
     );
     last_time = TIMER_TASK_GET_TICK_COUNT();
     last_code_counter = code_counter;
@@ -153,7 +153,7 @@ int main(void)
 
     while(1) {
         TIMER_TASK(timer1, 2000, 1) {
-            led_timer_proc();
+            test_timer_proc();
         }
     }
 }

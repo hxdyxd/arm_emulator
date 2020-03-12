@@ -119,6 +119,8 @@ void vTickISR( void )
     /* Save the context of the interrupted task. */
     portSAVE_CONTEXT();
 
+    INT_PND = 0;
+
     /* Increment the RTOS tick count, then look for the highest priority
     task that is ready to run. */
     __asm volatile

@@ -1,10 +1,16 @@
 /* 2020 03 11 */
 /* By hxdyxd */
+#include <stdlib.h>
 #include <armv4.h>
 #include <peripheral.h>
 
+#define USE_LINUX     0
+#define USE_NON_OS    1
+#define USE_RTOS      2
 
-#if 1
+
+#define BUILD_MODE   (USE_RTOS)
+
 
 //cpu memory
 struct armv4_cpu_t cpu_handle;
@@ -67,6 +73,7 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
     fp = fopen(file_name, "rb");
     if(fp == NULL) {
         ERROR("Error opening input mem file\n");
+        exit(-1);
     }
     address = start;
     while(!feof(fp)) {
@@ -80,6 +87,10 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
 }
 
 
+
+#if(BUILD_MODE == USE_LINUX)
+
+
 #define IMAGE_LOAD_ADDRESS   (0x8000)
 #define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
 
@@ -89,7 +100,7 @@ const char *dtb_path = "./arm_linux/arm-emulator.dtb";
 
 int main(int argc, char **argv)
 {
-    printf("welcome to armv4 emulator\n");
+    printf("welcome to armv4 linux emulator\n");
     struct armv4_cpu_t *cpu = &cpu_handle;
 
     cpu_init(cpu);
@@ -130,6 +141,56 @@ int main(int argc, char **argv)
 
     return 0;
 }
+/*end of linux*/
+#elif (BUILD_MODE == USE_NON_OS) || (BUILD_MODE == USE_RTOS)
+
+#if (BUILD_MODE == USE_NON_OS)
+const char *path = "./arm_hello_gcc/hello.bin";
+#elif (BUILD_MODE == USE_RTOS)
+const char *path = "./arm_freertos/hello.bin";
 #endif
+
+
+int main(int argc, char **argv)
+{
+    printf("welcome to armv4 nonos emulator\n");
+    struct armv4_cpu_t *cpu = &cpu_handle;
+
+    cpu_init(cpu);
+    peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
+    load_program_memory(cpu, path, 0);
+
+
+    for(;;) {
+        cpu->code_counter++;
+
+        fetch(cpu);
+        if(mmu_check_status(&cpu->mmu)) {
+            //check fetch instruction_word fault
+            interrupt_exception(cpu, INT_EXCEPTION_PREABT);
+            cpu->mmu.mmu_fault = 0;
+            continue;
+        }
+
+        decode(cpu);
+        if(cpu->decoder.swi_flag) {
+            cpu->decoder.swi_flag = 0;
+            interrupt_exception(cpu, INT_EXCEPTION_SWI);
+        } else if(mmu_check_status(&cpu->mmu)) {
+            //check memory data fault
+            interrupt_exception(cpu, INT_EXCEPTION_DATAABT);
+            cpu->mmu.mmu_fault = 0;
+        } else {
+            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 40000)) {
+                interrupt_exception(cpu, INT_EXCEPTION_IRQ);
+            }
+        }
+    }
+
+    return 0;
+}
+/*end of non os*/
+#endif
+
 
 /*****************************END OF FILE***************************/

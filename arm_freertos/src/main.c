@@ -10,7 +10,7 @@
 
 
 //uart
-#define SERIAL_THR   *(volatile unsigned char *) (0x40020000)
+#define SERIAL_THR   *(volatile unsigned char *) (0x4001f004)
 
 #define INT_MSK   *(volatile unsigned int *) (0x4001f040)
 #define INT_PND   *(volatile unsigned int *) (0x4001f044)
@@ -56,13 +56,13 @@ static void math_task(void *param)
 {
     while(1) {
         printf("\r\n--------------------------------[ARM9]--------------------------\r\n");
-        vTaskDelay( 1000 );
+        vTaskDelay( 100 ); //1s
         printf("\r\n acos(0) %f \r\n", acos(0));
-        vTaskDelay( 1000 );
+        vTaskDelay( 100 );
         printf("\r\n exp(1) %f \r\n", exp(1));
-        vTaskDelay( 1000 );
+        vTaskDelay( 100 );
         printf("\r\n log(10) %f \r\n", log(10));
-        vTaskDelay( 1000 );
+        vTaskDelay( 100 );
     }
 }
 
@@ -70,7 +70,7 @@ static void pi_task(void *param)
 {
     while(1) {
         pi_test();
-        vTaskDelay( 100 );
+        vTaskDelay( 10 );
     }
 }
 
@@ -81,7 +81,7 @@ int main(void)
     INT_MSK &= ~(3<<0); //enable timer interrupt
     TIM_ENA = 1;
 
-    if(xTaskCreate( math_task, "MathTest", 256, NULL, ( tskIDLE_PRIORITY + 3 ), NULL ) != pdPASS) {
+    if(xTaskCreate( math_task, "MathTest", 256, NULL, ( tskIDLE_PRIORITY + 2 ), NULL ) != pdPASS) {
         goto exit;
     }
     printf("task1 create ok!\r\n");
