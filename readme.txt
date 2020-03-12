@@ -6,7 +6,12 @@ Device Tree Support:
 https://github.com/hxdyxd/arm-emulator-linux/blob/master/arch/arm/boot/dts/arm-emulator.dts
 
 Console Log:
-KIPS_SPEED = 40000
+welcome to armv4 emulator
+[0]Peripheral register at 0x00000000, size 33554432: ok!
+[1]Peripheral register at 0x4001f040, size 8: ok!
+[2]Peripheral register at 0x4001f020, size 8: ok!
+[3]Peripheral register at 0x4001f000, size 8: ok!
+[4]Peripheral register at 0x40020000, size 256: ok!
 load mem start 0x8000, size 0xa1d1a0
 load mem start 0x1ffc000, size 0x4e4
 [    0.000000] Booting Linux on physical CPU 0x0
@@ -29,50 +34,50 @@ load mem start 0x1ffc000, size 0x4e4
 [    0.000000] armemulator-timer base address = 0xf001f020
 [    0.000000] sched_clock: 32 bits at 1kHz, resolution 1000000ns, wraps every 2147483647500000ns
 [    0.000000] clocksource: timer: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
-[    0.016000] set periodic to 240000
-[    0.016000] Console: colour dummy device 80x30
-[    0.016000] Calibrating delay loop... 27.69 BogoMIPS (lpj=138496)
-[    0.157000] pid_max: default: 32768 minimum: 301
-[    0.157000] Mount-cache hash table entries: 1024 (order: 0, 4096 bytes)
-[    0.157000] Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes)
-[    0.188000] CPU: Testing write buffer coherency: ok
-[    0.188000] Setting up static identity map for 0x100000 - 0x100058
-[    0.203000] devtmpfs: initialized
-[    0.235000] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
-[    0.235000] futex hash table entries: 256 (order: -1, 3072 bytes)
-[    0.250000] NET: Registered protocol family 16
-[    0.250000] DMA: preallocated 256 KiB pool for atomic coherent allocations
-[    0.375000] clocksource: Switched to clocksource timer
-[    0.547000] NET: Registered protocol family 2
-[    0.578000] tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes)
-[    0.578000] TCP established hash table entries: 1024 (order: 0, 4096 bytes)
-[    0.578000] TCP bind hash table entries: 1024 (order: 0, 4096 bytes)
-[    0.578000] TCP: Hash tables configured (established 1024 bind 1024)
-[    0.578000] UDP hash table entries: 256 (order: 0, 4096 bytes)
-[    0.578000] UDP-Lite hash table entries: 256 (order: 0, 4096 bytes)
-[    0.594000] NET: Registered protocol family 1
-[    4.016000] random: fast init done
-[   13.688000] workingset: timestamp_bits=30 max_order=13 bucket_order=0
-[   14.282000] jitterentropy: Initialization failed with host not compliant with requirements: 2
-[   14.282000] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 254)
-[   14.282000] io scheduler mq-deadline registered
-[   14.282000] io scheduler kyber registered
-[   14.297000] io scheduler bfq registered
-[   14.375000] Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
-[   14.407000] printk: console [ttyS0] disabled
-[   14.407000] 40020000.serial: ttyS0 at MMIO 0x40020000 (irq = 17, base_baud = 230400) is a 8250
-[   14.407000] printk: console [ttyS0] enabled
-[   14.407000] printk: console [ttyS0] enabled
-[   14.407000] printk: bootconsole [earlycon0] disabled
-[   14.407000] printk: bootconsole [earlycon0] disabled
-[   14.657000] brd: module loaded
-[   14.672000] NET: Registered protocol family 17
-[   14.672000] Key type dns_resolver registered
-[   15.000000] Freeing unused kernel memory: 4096K
-[   15.000000] Run /init as init process
+[    0.000000] set periodic to 240000
+[    0.015000] Console: colour dummy device 80x30
+[    0.015000] Calibrating delay loop... 20.40 BogoMIPS (lpj=102016)
+[    0.375000] pid_max: default: 32768 minimum: 301
+[    0.390000] Mount-cache hash table entries: 1024 (order: 0, 4096 bytes)
+[    0.390000] Mountpoint-cache hash table entries: 1024 (order: 0, 4096 bytes)
+[    0.453000] CPU: Testing write buffer coherency: ok
+[    0.468000] Setting up static identity map for 0x100000 - 0x100058
+[    0.515000] devtmpfs: initialized
+[    0.562000] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 19112604462750000 ns
+[    0.562000] futex hash table entries: 256 (order: -1, 3072 bytes)
+[    0.578000] NET: Registered protocol family 16
+[    0.593000] DMA: preallocated 256 KiB pool for atomic coherent allocations
+[    0.750000] clocksource: Switched to clocksource timer
+[    0.937000] NET: Registered protocol family 2
+[    0.953000] tcp_listen_portaddr_hash hash table entries: 512 (order: 0, 4096 bytes)
+[    0.953000] TCP established hash table entries: 1024 (order: 0, 4096 bytes)
+[    0.953000] TCP bind hash table entries: 1024 (order: 0, 4096 bytes)
+[    0.953000] TCP: Hash tables configured (established 1024 bind 1024)
+[    0.953000] UDP hash table entries: 256 (order: 0, 4096 bytes)
+[    0.968000] UDP-Lite hash table entries: 256 (order: 0, 4096 bytes)
+[    0.968000] NET: Registered protocol family 1
+[    4.015000] random: fast init done
+[   17.953000] workingset: timestamp_bits=30 max_order=13 bucket_order=0
+[   18.734000] jitterentropy: Initialization failed with host not compliant with requirements: 2
+[   18.750000] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 254)
+[   18.750000] io scheduler mq-deadline registered
+[   18.750000] io scheduler kyber registered
+[   18.750000] io scheduler bfq registered
+[   18.828000] Serial: 8250/16550 driver, 4 ports, IRQ sharing disabled
+[   18.859000] printk: console [ttyS0] disabled
+[   18.859000] 40020000.serial: ttyS0 at MMIO 0x40020000 (irq = 17, base_baud = 230400) is a 8250
+[   18.859000] printk: console [ttyS0] enabled
+[   18.859000] printk: console [ttyS0] enabled
+[   18.859000] printk: bootconsole [earlycon0] disabled
+[   18.859000] printk: bootconsole [earlycon0] disabled
+[   19.203000] brd: module loaded
+[   19.234000] NET: Registered protocol family 17
+[   19.234000] Key type dns_resolver registered
+[   19.718000] Freeing unused kernel memory: 4096K
+[   19.734000] Run /init as init process
 Starting syslogd: OK
 Starting klogd: OK
-Initializing random number generator... [   17.328000] random: dd: uninitialized urandom read (512 bytes read)
+Initializing random number generator... [   22.453000] random: dd: uninitialized urandom read (512 bytes read)
 done.
 Starting network: OK
 
