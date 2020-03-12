@@ -16,7 +16,7 @@ struct peripheral_t peripheral_reg_base;
 //peripheral address & function config
 struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
     {
-        .mask = ~(MEM_SIZE-1), //nbit
+        .mask = ~(MEM_SIZE-1), //25bit
         .prefix = 0x00000000,
         .reg_base = &peripheral_reg_base.memory[0],
         .reset = memory_reset,
@@ -24,7 +24,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = memory_write,
     },
     {
-        .mask = ~0x7, //3bit
+        .mask = ~(8-1), //3bit
         .prefix = 0x4001f040,
         .reg_base = &peripheral_reg_base.intc,
         .reset = intc_reset,
@@ -32,7 +32,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = intc_write,
     },
     {
-        .mask = ~0x7, //3bit
+        .mask = ~(8-1), //3bit
         .prefix = 0x4001f020,
         .reg_base = &peripheral_reg_base.tim,
         .reset = tim_reset,
@@ -40,7 +40,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = tim_write,
     },
     {
-        .mask = ~0x7, //3bit
+        .mask = ~(8-1), //3bit
         .prefix = 0x4001f000,
         .reg_base = &peripheral_reg_base.earlyuart,
         .reset = earlyuart_reset,
@@ -48,7 +48,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = earlyuart_write,
     },
     {
-        .mask = ~0xff, //8bit
+        .mask = ~(256-1), //8bit
         .prefix = 0x40020000,
         .reg_base = &peripheral_reg_base.uart[0],
         .reset = uart_8250_reset,
@@ -57,57 +57,6 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
     },
 };
 
-
-/*
- * user_event: interrupt request
- * author:hxdyxd
- */
-uint32_t user_event(struct armv4_cpu_t *cpu, uint32_t kips_speed)
-{
-    uint32_t event = 0;
-    struct interrupt_register *intc = &peripheral_reg_base.intc;
-    struct timer_register *tim = &peripheral_reg_base.tim;
-    struct uart_register *uart = &peripheral_reg_base.uart[0];
-    if(tim->EN && !cpsr_i(cpu) && cpu->code_counter%kips_speed == 0 ) {
-        //timer enable, int_controler enable, cpsr_irq not disable
-        //per 10 millisecond timer irq
-        //kips_speed：Avoid calling GET_TICK functions frequently
-        static uint32_t tick_timer = 0;
-        uint32_t new_tick_timer = GET_TICK();
-        if(new_tick_timer - tick_timer >= 10) {
-#if 0
-            //Debug instructions per 10ms, kips_speed should be less than this value
-            static uint32_t code_counter_tmp = 0, slow_count = 0;
-            if(slow_count++ >= 100) {
-                slow_count = 0;
-                printf("i/10ms,%d\n", code_counter - code_counter_tmp);
-            }
-            code_counter_tmp = code_counter;
-#endif
-            tick_timer = new_tick_timer;
-            event = interrupt_happen(intc, 0);
-        }
-    } else if( (uart->IER&0xf) && !cpsr_i(cpu)  ) {
-        //uart enable, cpsr_irq not disable
-        //UART
-        if( (uart->IER&0x2) ) {
-            //Bit1, Enable Transmit Holding Register Empty Interrupt. 
-            if((event = interrupt_happen(intc, 1)) != 0) {
-                uart->IIR = 0x2; // THR empty
-            }
-        } else  if( (uart->IER&0x1) && cpu->code_counter%kips_speed == (kips_speed/2) && KBHIT() ) {
-            //Avoid calling kbhit functions frequently
-            //Bit0, Enable Received Data Available Interrupt. 
-            if((event = interrupt_happen(intc, 1)) != 0 ) {
-                uart->IIR = 0x4; //received data available
-                uart->LSR |= 1;
-            }
-        } else {
-            uart->IIR = 1; //no interrupt pending
-        }
-    }
-    return event;
-}
 
 //load_program_memory reads the input memory, and populates the instruction 
 // memory
@@ -173,7 +122,7 @@ int main(int argc, char **argv)
             interrupt_exception(cpu, INT_EXCEPTION_DATAABT);
             cpu->mmu.mmu_fault = 0;
         } else {
-            if(user_event(cpu, 40000)) {
+            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 40000)) {
                 interrupt_exception(cpu, INT_EXCEPTION_IRQ);
             }
         }

@@ -82,7 +82,7 @@ void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 
 #define  int_is_set(v, bit) ( ((v)>>(bit))&1 )
 
-uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id)
+static uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id)
 {
     if( int_is_set(intc->MSK, id) || int_is_set(intc->PND, id) ) {
         //masked or not cleared
@@ -90,6 +90,57 @@ uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id)
     }
     intc->PND |= 1 << id;
     return 1;
+}
+
+/*
+ * user_event: interrupt request
+ * author:hxdyxd
+ */
+uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, const uint32_t kips_speed)
+{
+    uint32_t event = 0;
+    struct interrupt_register *intc = &base->intc;
+    struct timer_register *tim = &base->tim;
+    struct uart_register *uart = &base->uart[0];
+    if(tim->EN && code_counter%kips_speed == 0 ) {
+        //timer enable, int_controler enable, cpsr_irq not disable
+        //per 10 millisecond timer irq
+        //kips_speed：Avoid calling GET_TICK functions frequently
+        static uint32_t tick_timer = 0;
+        uint32_t new_tick_timer = GET_TICK();
+        if(new_tick_timer - tick_timer >= 10) {
+#if 0
+            //Debug instructions per 10ms, kips_speed should be less than this value
+            static uint32_t code_counter_tmp = 0, slow_count = 0;
+            if(slow_count++ >= 100) {
+                slow_count = 0;
+                printf("i/10ms,%d\n", code_counter - code_counter_tmp);
+            }
+            code_counter_tmp = code_counter;
+#endif
+            tick_timer = new_tick_timer;
+            event = interrupt_happen(intc, 0);
+        }
+    } else if( (uart->IER&0xf) ) {
+        //uart enable, cpsr_irq not disable
+        //UART
+        if( (uart->IER&0x2) ) {
+            //Bit1, Enable Transmit Holding Register Empty Interrupt. 
+            if((event = interrupt_happen(intc, 1)) != 0) {
+                uart->IIR = 0x2; // THR empty
+            }
+        } else  if( (uart->IER&0x1) && code_counter%kips_speed == (kips_speed/2) && KBHIT() ) {
+            //Avoid calling kbhit functions frequently
+            //Bit0, Enable Received Data Available Interrupt. 
+            if((event = interrupt_happen(intc, 1)) != 0 ) {
+                uart->IIR = 0x4; //received data available
+                uart->LSR |= 1;
+            }
+        } else {
+            uart->IIR = 1; //no interrupt pending
+        }
+    }
+    return event;
 }
 
 /******************************interrupt**************************************/

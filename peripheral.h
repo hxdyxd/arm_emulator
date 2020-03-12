@@ -65,6 +65,7 @@ void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 void intc_reset(void *base);
 uint32_t intc_read(void *base, uint32_t address);
 void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
+uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, const uint32_t kips_speed);
 
 void tim_reset(void *base);
 uint32_t tim_read(void *base, uint32_t address);
@@ -78,8 +79,6 @@ void uart_8250_reset(void *base);
 uint32_t uart_8250_read(void *base, uint32_t address);
 void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
-uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id);
-//uint32_t user_event(struct armv4_cpu_t *cpu, uint32_t kips_speed);
 
 #endif
 
