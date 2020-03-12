@@ -8,8 +8,6 @@
 #include <stdio.h>
 
 
-#define MEM_SIZE   (0x2000000)  //32M
-
 
 #define DEBUG                  0
 
@@ -63,8 +61,6 @@ struct armv4_cpu_t {
 #define   CPU_MODE_Abort     5
 #define   CPU_MODE_Mon       6
 
-    uint8_t memory[MEM_SIZE];
-
     struct decoder_t {
         uint32_t instruction_word;
         uint8_t swi_flag;
@@ -84,8 +80,8 @@ struct armv4_cpu_t {
             uint32_t prefix;
             void *reg_base;
             void (*reset)(void *base);
-            uint32_t (*read)(void *base, uint8_t address);
-            void (*write)(void *base, uint8_t address, uint32_t data);
+            uint32_t (*read)(void *base, uint32_t address);
+            void (*write)(void *base, uint32_t address, uint32_t data, uint8_t mask);
         }*link;
     }peripheral;
 
@@ -142,9 +138,6 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, ui
 #define  write_halfword_mode(cpu,m,a,d)     write_mem(cpu,m,a,(d)&0xffff,1)
 #define  write_byte_mode(cpu,m,a,d)         write_mem(cpu,m,a,(d)&0xff,0)
 
-
-//extern
-uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uint32_t start);
 
 #endif
 /*****************************END OF FILE***************************/

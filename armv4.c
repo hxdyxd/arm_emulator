@@ -384,30 +384,25 @@ uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
         address = mmu_transfer(cpu, address, privileged, 0); //read
     }
     
-    if( (address>>20) ==0x400) {
-        //1M Peripheral memory
-        for(int i=0; i<cpu->peripheral.number; i++) {
-            if((address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
-                uint32_t offset = address - cpu->peripheral.link[i].prefix;
-                if(cpu->peripheral.link[i].read)
-                    return cpu->peripheral.link[i].read(cpu->peripheral.link[i].reg_base, offset);
-            }
+    //1M Peripheral memory
+    for(int i=0; i<cpu->peripheral.number; i++) {
+        if((address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
+            uint32_t offset = address - cpu->peripheral.link[i].prefix;
+            if(cpu->peripheral.link[i].read)
+                return cpu->peripheral.link[i].read(cpu->peripheral.link[i].reg_base, offset);
         }
+    }
 
-        if(address == 0x4001f030) {
-            //code counter
-            return cpu->code_counter;
-        } else if(address == MMU_EXCEPTION_ADDR) {
-            return 0xffffffff;
-        }
+    if(address == 0x4001f030) {
+        //code counter
+        return cpu->code_counter;
+    } else if(address == MMU_EXCEPTION_ADDR) {
+        return 0xffffffff;
     }
     
-    if(address >= MEM_SIZE) {
-        WARN("mem overflow error, read 0x%x\r\n", address);
-        exception_out(cpu);
-    }
-    
-    return *((int*)(cpu->memory + address));
+    WARN("mem overflow error, read 0x%x\r\n", address);
+    exception_out(cpu);
+    return 0xffffffff;
 }
 
 
@@ -425,50 +420,25 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, ui
     
     address = mmu_transfer(cpu, address, privileged, 1); //write
     
-    if( (address>>20) ==0x400) {
-        //1M Peripheral memory
-        for(int i=0; i<cpu->peripheral.number; i++) {
-            if((address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
-                uint32_t offset = address - cpu->peripheral.link[i].prefix;
-                if(cpu->peripheral.link[i].write)
-                    cpu->peripheral.link[i].write(cpu->peripheral.link[i].reg_base, offset, data);
-                return;
-            }
-        }
-        if(address == 0x4001f030) {
-            //ips
-            cpu->code_counter = data;
-            return;
-        } else if(address == MMU_EXCEPTION_ADDR) {
+    //4G Peripheral memory
+    for(int i=0; i<cpu->peripheral.number; i++) {
+        if((address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
+            uint32_t offset = address - cpu->peripheral.link[i].prefix;
+            if(cpu->peripheral.link[i].write)
+                cpu->peripheral.link[i].write(cpu->peripheral.link[i].reg_base, offset, data, mask);
             return;
         }
+    }
+    if(address == 0x4001f030) {
+        //ips
+        cpu->code_counter = data;
+        return;
+    } else if(address == MMU_EXCEPTION_ADDR) {
+        return;
     }
 
-    if(address >= MEM_SIZE) {
-        WARN("mem error, write %d = 0x%0x\r\n", mask, address);
-        exception_out(cpu);
-    }
-    
-    switch(mask) {
-    case 3:
-        {    
-            int *data_p = (int *) (cpu->memory + address);
-            *data_p = data;
-        }
-        break;
-    case 1:
-        {
-            short *data_p = (short *) (cpu->memory + address);
-            *data_p = data;
-        }
-        break;
-    default:
-        {
-            char * data_p = (char *) (cpu->memory + address);
-            *data_p = data;
-        }
-        break;
-    }
+    WARN("mem error, write %d = 0x%0x\r\n", mask, address);
+    exception_out(cpu);
 }
 
 
@@ -618,8 +588,8 @@ void decode(struct armv4_cpu_t *cpu)
     }
     
     if(!cond_satisfy) {
-        //PRINTF("cond_satisfy = %d skip...\r\n", cond_satisfy);
-        return /*cond_satisfy*/;
+        PRINTF("cond_satisfy = %d skip...\r\n", cond_satisfy);
+        return;
     }
     
 
@@ -1052,7 +1022,8 @@ void decode(struct armv4_cpu_t *cpu)
             
             register_write(cpu, Rn, multl_long >> 32);
             register_write(cpu, Rd, multl_long&0xffffffff);
-            PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n", register_read(cpu, Rn), Rn, register_read(cpu, Rd), Rd, operand2, rot_num);
+            PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n",
+             register_read(cpu, Rn), Rn, register_read(cpu, Rd), Rd, operand2, rot_num);
             
             if(Bit20) {
                 //Update CPSR register
@@ -1381,8 +1352,12 @@ void decode(struct armv4_cpu_t *cpu)
     
     /**************************alu*************************/
     
-    uint32_t sum_middle = add_flag?((operand1&0x7fffffff) + (operand2&0x7fffffff) + carry):((operand1&0x7fffffff) - (operand2&0x7fffffff) - carry);
-    uint32_t cy_high_bits =  add_flag?(IS_SET(operand1, 31) + IS_SET(operand2, 31) + IS_SET(sum_middle, 31)):(IS_SET(operand1, 31) - IS_SET(operand2, 31) - IS_SET(sum_middle, 31));
+    uint32_t sum_middle = add_flag?
+        ((operand1&0x7fffffff) + (operand2&0x7fffffff) + carry):
+        ((operand1&0x7fffffff) - (operand2&0x7fffffff) - carry);
+    uint32_t cy_high_bits =  add_flag?
+        (IS_SET(operand1, 31) + IS_SET(operand2, 31) + IS_SET(sum_middle, 31)):
+        (IS_SET(operand1, 31) - IS_SET(operand2, 31) - IS_SET(sum_middle, 31));
     uint32_t aluout = ((cy_high_bits&1) << 31) | (sum_middle&0x7fffffff);
     PRINTF("[ALU]op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", operand1, operand2, carry, aluout);
     
@@ -1750,7 +1725,7 @@ void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link
     cpu->peripheral.link = link;
     cpu->peripheral.number = number;
     for(int i=0; i<cpu->peripheral.number; i++) {
-        WARN("[%d]Peripheral register at 0x%08x: ", i, cpu->peripheral.link[i].prefix);
+        WARN("[%d]Peripheral register at 0x%08x, size %d: ", i, cpu->peripheral.link[i].prefix, (~cpu->peripheral.link[i].mask)+1);
         if(cpu->peripheral.link[i].reset) {
             cpu->peripheral.link[i].reset(cpu->peripheral.link[i].reg_base);
             WARN("ok!");
@@ -1759,24 +1734,5 @@ void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link
     }
 }
 
-//load_program_memory reads the input memory, and populates the instruction 
-// memory
-uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uint32_t start)
-{
-    FILE *fp;
-    unsigned int address, instruction;
-    fp = fopen(file_name, "rb");
-    if(fp == NULL) {
-        ERROR("Error opening input mem file\n");
-    }
-    address = start;
-    while(!feof(fp)) {
-        fread(&instruction, 4, 1, fp);
-        write_word(cpu, address, instruction);
-        address = address + 4;
-    }
-    WARN("load mem start 0x%x, size 0x%x \r\n", start, address - start - 4);
-    fclose(fp);
-    return address - start - 4;
-}
+
 /*****************************END OF FILE***************************/

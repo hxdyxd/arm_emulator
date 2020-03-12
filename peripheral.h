@@ -20,11 +20,14 @@
 /*******HAL END*******/
 
 
+#define MEM_SIZE   (0x2000000)  //32M
 #define UART_NUMBER    1
 
 
 
 struct peripheral_t {
+    uint8_t memory[MEM_SIZE];
+
     struct interrupt_register {
         uint32_t MSK; //Determine which interrupt source is masked.
         uint32_t PND; //Indicate the interrupt request status
@@ -55,21 +58,25 @@ struct peripheral_t {
     }uart[UART_NUMBER];
 };
 
+void memory_reset(void *base);
+uint32_t memory_read(void *base, uint32_t address);
+void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
+
 void intc_reset(void *base);
-uint32_t intc_read(void *base, uint8_t address);
-void intc_write(void *base, uint8_t address, uint32_t data);
+uint32_t intc_read(void *base, uint32_t address);
+void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
 void tim_reset(void *base);
-uint32_t tim_read(void *base, uint8_t address);
-void tim_write(void *base, uint8_t address, uint32_t data);
+uint32_t tim_read(void *base, uint32_t address);
+void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
 void earlyuart_reset(void *base);
-uint32_t earlyuart_read(void *base, uint8_t address);
-void earlyuart_write(void *base, uint8_t address, uint32_t data);
+uint32_t earlyuart_read(void *base, uint32_t address);
+void earlyuart_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
 void uart_8250_reset(void *base);
-uint32_t uart_8250_read(void *base, uint8_t address);
-void uart_8250_write(void *base, uint8_t address, uint32_t data);
+uint32_t uart_8250_read(void *base, uint32_t address);
+void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
 uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id);
 //uint32_t user_event(struct armv4_cpu_t *cpu, uint32_t kips_speed);

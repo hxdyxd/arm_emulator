@@ -12,9 +12,17 @@ struct armv4_cpu_t cpu_handle;
 //peripheral register
 struct peripheral_t peripheral_reg_base;
 
-#define PERIPHERAL_NUMBER    (4)
+#define PERIPHERAL_NUMBER    (5)
 //peripheral address & function config
 struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
+    {
+        .mask = ~(MEM_SIZE-1), //nbit
+        .prefix = 0x00000000,
+        .reg_base = &peripheral_reg_base.memory[0],
+        .reset = memory_reset,
+        .read = memory_read,
+        .write = memory_write,
+    },
     {
         .mask = ~0x7, //3bit
         .prefix = 0x4001f040,
@@ -101,6 +109,26 @@ uint32_t user_event(struct armv4_cpu_t *cpu, uint32_t kips_speed)
     return event;
 }
 
+//load_program_memory reads the input memory, and populates the instruction 
+// memory
+uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uint32_t start)
+{
+    FILE *fp;
+    unsigned int address, instruction;
+    fp = fopen(file_name, "rb");
+    if(fp == NULL) {
+        ERROR("Error opening input mem file\n");
+    }
+    address = start;
+    while(!feof(fp)) {
+        fread(&instruction, 4, 1, fp);
+        write_word(cpu, address, instruction);
+        address = address + 4;
+    }
+    WARN("load mem start 0x%x, size 0x%x \r\n", start, address - start - 4);
+    fclose(fp);
+    return address - start - 4;
+}
 
 
 #define IMAGE_LOAD_ADDRESS   (0x8000)
