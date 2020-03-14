@@ -19,6 +19,7 @@ https://github.com/hxdyxd/arm-emulator-linux/blob/master/arch/arm/boot/dts/arm-e
 
 ## Usage
 
+```
   usage:
 
   arm_emulator
@@ -30,4 +31,4 @@ https://github.com/hxdyxd/arm-emulator-linux/blob/master/arch/arm/boot/dts/arm-e
 
        [-v]                       Verbose mode.
        [-h, --help]               Print this message.
-
+```
