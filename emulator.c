@@ -9,6 +9,9 @@
 #define USE_LINUX     0
 #define USE_BINARY    1
 
+#define IMAGE_LOAD_ADDRESS   (0x8000)
+#define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
+
 
 //cpu memory
 struct armv4_cpu_t cpu_handle;
@@ -76,6 +79,7 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
     return address - start - 4;
 }
 
+
 void usage(const char *file)
 {
     printf("\n");
@@ -87,23 +91,19 @@ void usage(const char *file)
     printf(
         "       -f <image_path>            Set Image or Binary file path.\n");
     printf(
-        "       -t <device_tree_path>    Set Devices tree path.\n");
+        "       [-t <device_tree_path>]    Set Devices tree path.\n");
     printf(
-        "       -d                       Display debug message.\n");
+        "       [-d]                       Display debug message.\n");
     printf(
-        "       -s                       Step by step mode.\n");
+        "       [-s]                       Step by step mode.\n");
     printf("\n");
     printf(
         "       [-v]                       Verbose mode.\n");
     printf(
         "       [-h, --help]               Print this message.\n");
     printf("\n");
-    printf("Reference: https://github.com/hxdyxd/arm-emulator\n");
+    printf("Reference: https://github.com/hxdyxd/arm_emulator\n");
 }
-
-
-#define IMAGE_LOAD_ADDRESS   (0x8000)
-#define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
 
 
 int main(int argc, char **argv)
