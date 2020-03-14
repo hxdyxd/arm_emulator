@@ -7,7 +7,7 @@
 
 #define CONFIG_MS    (10)
 //uart
-#define SERIAL_THR   *(volatile unsigned char *) (0x4001f004)
+#define SERIAL_THR   *(volatile unsigned char *) (0x40020000)
 
 #define INT_MSK   *(volatile unsigned int *) (0x4001f040)
 #define INT_PND   *(volatile unsigned int *) (0x4001f044)

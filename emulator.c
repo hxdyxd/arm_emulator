@@ -18,7 +18,7 @@ struct armv4_cpu_t cpu_handle;
 //peripheral register
 struct peripheral_t peripheral_reg_base;
 
-#define PERIPHERAL_NUMBER    (5)
+#define PERIPHERAL_NUMBER    (4)
 //peripheral address & function config
 struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
     {
@@ -46,14 +46,6 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = tim_write,
     },
     {
-        .mask = ~(8-1), //3bit
-        .prefix = 0x4001f000,
-        .reg_base = &peripheral_reg_base.earlyuart,
-        .reset = earlyuart_reset,
-        .read = earlyuart_read,
-        .write = earlyuart_write,
-    },
-    {
         .mask = ~(256-1), //8bit
         .prefix = 0x40020000,
         .reg_base = &peripheral_reg_base.uart[0],
@@ -72,7 +64,7 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
     unsigned int address, instruction;
     fp = fopen(file_name, "rb");
     if(fp == NULL) {
-        ERROR("Error opening input mem file\n");
+        ERROR("Error opening input mem file %s\n", file_name);
         exit(-1);
     }
     address = start;
@@ -81,14 +73,11 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
         write_word(cpu, address, instruction);
         address = address + 4;
     }
-    WARN("load mem start 0x%x, size 0x%x \r\n", start, address - start - 4);
+    WARN("load mem base 0x%x, size 0x%x, %s\r\n", start, address - start - 4, file_name);
     fclose(fp);
     return address - start - 4;
 }
 
-
-
-#if(BUILD_MODE == USE_LINUX)
 
 
 #define IMAGE_LOAD_ADDRESS   (0x8000)
@@ -98,23 +87,41 @@ const char *path = "./arm_linux/Image";
 const char *dtb_path = "./arm_linux/arm-emulator.dtb";
 
 
+const char *nonos_path = "./arm_hello_gcc/hello.bin";
+const char *rtos_path = "./arm_freertos/hello.bin";
+
+
 int main(int argc, char **argv)
 {
-    printf("welcome to armv4 linux emulator\n");
+    printf("welcome to arm_emulator\n");
     struct armv4_cpu_t *cpu = &cpu_handle;
 
     cpu_init(cpu);
     peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
-    load_program_memory(cpu, path, IMAGE_LOAD_ADDRESS);
-    load_program_memory(cpu, dtb_path, DTB_BASE_ADDRESS);
 
-    /* linux environment, Kernel boot conditions */
-    register_write(cpu, 1, 0xffffffff);         //set r1
-    register_write(cpu, 2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
-    register_write(cpu, 15, IMAGE_LOAD_ADDRESS);            //set pc, jump to Load Address
+    switch(BUILD_MODE) {
+    case USE_LINUX:
+        load_program_memory(cpu, kernel_path, IMAGE_LOAD_ADDRESS);
+        load_program_memory(cpu, dtb_path, DTB_BASE_ADDRESS);
+
+        /* linux environment, Kernel boot conditions */
+        register_write(cpu, 1, 0xffffffff);         //set r1
+        register_write(cpu, 2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
+        register_write(cpu, 15, IMAGE_LOAD_ADDRESS);            //set pc, jump to Load Address
+        break;
+    case USE_NON_OS:
+        load_program_memory(cpu, nonos_path, 0);
+        break;
+    case USE_RTOS:
+        load_program_memory(cpu, rtos_path, 0);
+        break;
+    default:
+        return -1;
+    }
 
     for(;;) {
         cpu->code_counter++;
+        //printf("%d 0x%x\n", cpu->code_counter, register_read(cpu, 15));
 
         fetch(cpu);
         if(mmu_check_status(&cpu->mmu)) {
@@ -141,56 +148,6 @@ int main(int argc, char **argv)
 
     return 0;
 }
-/*end of linux*/
-#elif (BUILD_MODE == USE_NON_OS) || (BUILD_MODE == USE_RTOS)
-
-#if (BUILD_MODE == USE_NON_OS)
-const char *path = "./arm_hello_gcc/hello.bin";
-#elif (BUILD_MODE == USE_RTOS)
-const char *path = "./arm_freertos/hello.bin";
-#endif
-
-
-int main(int argc, char **argv)
-{
-    printf("welcome to armv4 nonos emulator\n");
-    struct armv4_cpu_t *cpu = &cpu_handle;
-
-    cpu_init(cpu);
-    peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
-    load_program_memory(cpu, path, 0);
-
-
-    for(;;) {
-        cpu->code_counter++;
-
-        fetch(cpu);
-        if(mmu_check_status(&cpu->mmu)) {
-            //check fetch instruction_word fault
-            interrupt_exception(cpu, INT_EXCEPTION_PREABT);
-            cpu->mmu.mmu_fault = 0;
-            continue;
-        }
-
-        decode(cpu);
-        if(cpu->decoder.swi_flag) {
-            cpu->decoder.swi_flag = 0;
-            interrupt_exception(cpu, INT_EXCEPTION_SWI);
-        } else if(mmu_check_status(&cpu->mmu)) {
-            //check memory data fault
-            interrupt_exception(cpu, INT_EXCEPTION_DATAABT);
-            cpu->mmu.mmu_fault = 0;
-        } else {
-            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 40000)) {
-                interrupt_exception(cpu, INT_EXCEPTION_IRQ);
-            }
-        }
-    }
-
-    return 0;
-}
-/*end of non os*/
-#endif
 
 
 /*****************************END OF FILE***************************/

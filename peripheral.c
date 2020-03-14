@@ -244,7 +244,7 @@ void uart_8250_reset(void *base)
 uint32_t uart_8250_read(void *base, uint32_t address)
 {
     struct uart_register *uart = base;
-    //PRINTF("uart read 0x%x\n", address);
+    //printf("uart read 0x%x\n", address);
     switch(address) {
     case 0x0:
         if(UART_LCR_DLAB(uart)) {
