@@ -7,19 +7,21 @@
 #include <string.h>
 #include <stdio.h>
 
+//exit
+#include <stdlib.h>
 
-
-#define DEBUG                  0
+extern uint8_t global_debug_flag;
+#define DEBUG                  (global_debug_flag)
 
 #define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
 #define WARN(...)  do{ if(1){printf(__VA_ARGS__);} }while(0)
-#define ERROR(...)  do{ if(1){printf(__VA_ARGS__);getchar();} }while(0)
+#define ERROR(...)  do{ if(1){printf(__VA_ARGS__);printf("Press any key to exit...\n");getchar();exit(-1);} }while(0)
 
 #define  IS_SET(v, bit) ( ((v)>>(bit))&1 )
 
 struct armv4_cpu_t {
     uint32_t spsr[7];
-#define  cpsr(cpu)    cpu->spsr[0]
+#define  cpsr(cpu)    (cpu)->spsr[0]
 
 #define  cpsr_n_set(cpu,v)  do{ if(v) {cpsr(cpu) |= 1 << 31;} else {cpsr(cpu) &= ~(1 << 31);} }while(0)
 #define  cpsr_z_set(cpu,v)  do{ if(v) {cpsr(cpu) |= 1 << 30;} else {cpsr(cpu) &= ~(1 << 30);} }while(0)

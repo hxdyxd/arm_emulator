@@ -4,12 +4,10 @@
 #include <armv4.h>
 #include <peripheral.h>
 
+#include <unistd.h>
+
 #define USE_LINUX     0
-#define USE_NON_OS    1
-#define USE_RTOS      2
-
-
-#define BUILD_MODE   (USE_RTOS)
+#define USE_BINARY    1
 
 
 //cpu memory
@@ -73,35 +71,98 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
         write_word(cpu, address, instruction);
         address = address + 4;
     }
-    WARN("load mem base 0x%x, size 0x%x, %s\r\n", start, address - start - 4, file_name);
+    WARN("load mem base 0x%x, size 0x%x\r\n", start, address - start - 4);
     fclose(fp);
     return address - start - 4;
 }
 
+void usage(const char *file)
+{
+    printf("\n");
+    printf("%s\n\n", file);
+    printf("  usage:\n\n");
+    printf("  arm_emulator\n");
+    printf(
+        "       -m <mode>                  Select 'linux' or 'bin' mode, default is 'bin'.\n");
+    printf(
+        "       -f <image_path>            Set Image or Binary file path.\n");
+    printf(
+        "       -t <device_tree_path>    Set Devices tree path.\n");
+    printf(
+        "       -d                       Display debug message.\n");
+    printf(
+        "       -s                       Step by step mode.\n");
+    printf("\n");
+    printf(
+        "       [-v]                       Verbose mode.\n");
+    printf(
+        "       [-h, --help]               Print this message.\n");
+    printf("\n");
+    printf("Reference: https://github.com/hxdyxd/arm-emulator\n");
+}
 
 
 #define IMAGE_LOAD_ADDRESS   (0x8000)
 #define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
 
-const char *path = "./arm_linux/Image";
-const char *dtb_path = "./arm_linux/arm-emulator.dtb";
-
-
-const char *nonos_path = "./arm_hello_gcc/hello.bin";
-const char *rtos_path = "./arm_freertos/hello.bin";
-
 
 int main(int argc, char **argv)
 {
-    printf("welcome to arm_emulator\n");
     struct armv4_cpu_t *cpu = &cpu_handle;
+    //default value
+    uint8_t mode = USE_BINARY;
+    char *image_path = NULL;
+    char *dtb_path = NULL;
+    uint8_t step_by_step = 0;
+    int ch;
+
+    while((ch = getopt(argc, argv, "m:f:t:dshv")) != -1) {
+        switch(ch) {
+        case 't':
+            dtb_path = optarg;
+            break;
+        case 'f':
+            image_path = optarg;
+            break;
+        case 'm':
+            if(strcmp(optarg, "linux") == 0) {
+                mode = USE_LINUX;
+            } else if(strcmp(optarg, "bin") == 0) {
+                mode = USE_BINARY;
+            } else {
+                printf("unknown mode option :%s\n", optarg);
+                usage(argv[0]);
+                exit(-1);
+            }
+            break;
+        case 's':
+            step_by_step = 1;
+            break;
+        case 'd':
+            global_debug_flag = 1;
+            break;
+        case 'v':
+        case 'h':
+            usage(argv[0]);
+            exit(-1);
+        case '?': // 输入未定义的选项, 都会将该选项的值变为 ?
+            printf("unknown option \n");
+            usage(argv[0]);
+            exit(-1);
+        }
+    }
+    if(!image_path || (mode == USE_LINUX && !dtb_path) ) {
+        printf("parameter error \n");
+        usage(argv[0]);
+        exit(-1);
+    }
 
     cpu_init(cpu);
     peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
 
-    switch(BUILD_MODE) {
+    switch(mode) {
     case USE_LINUX:
-        load_program_memory(cpu, kernel_path, IMAGE_LOAD_ADDRESS);
+        load_program_memory(cpu, image_path, IMAGE_LOAD_ADDRESS);
         load_program_memory(cpu, dtb_path, DTB_BASE_ADDRESS);
 
         /* linux environment, Kernel boot conditions */
@@ -109,14 +170,11 @@ int main(int argc, char **argv)
         register_write(cpu, 2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
         register_write(cpu, 15, IMAGE_LOAD_ADDRESS);            //set pc, jump to Load Address
         break;
-    case USE_NON_OS:
-        load_program_memory(cpu, nonos_path, 0);
-        break;
-    case USE_RTOS:
-        load_program_memory(cpu, rtos_path, 0);
+    case USE_BINARY:
+        load_program_memory(cpu, image_path, 0);
         break;
     default:
-        return -1;
+        exit(-1);
     }
 
     for(;;) {
@@ -143,6 +201,11 @@ int main(int argc, char **argv)
             if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 40000)) {
                 interrupt_exception(cpu, INT_EXCEPTION_IRQ);
             }
+        }
+
+        if(step_by_step) {
+            printf("[%d] Press any key to continue...\n", cpu->code_counter);
+            getchar();
         }
     }
 

@@ -23,7 +23,7 @@ const char *shift_table[4] = {
     "ASR", //10
     "ROR", //11
 };
-
+uint8_t global_debug_flag = 0;
 
 /*
  * get_cpu_mode_code
