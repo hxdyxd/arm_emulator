@@ -1,5 +1,5 @@
-# 2019 06 26
-# By hxdyxd
+# Makefile of arm_emulator
+# Copyright (C) 2019-2020  hxdyxd <hxdyxd@gmail.com>
 CC = gcc
 
 
