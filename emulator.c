@@ -151,7 +151,7 @@ int main(int argc, char **argv)
             exit(-1);
         }
     }
-    if(!image_path || (mode == USE_LINUX && !dtb_path) ) {
+    if(!image_path) {
         printf("parameter error \n");
         usage(argv[0]);
         exit(-1);
@@ -163,11 +163,15 @@ int main(int argc, char **argv)
     switch(mode) {
     case USE_LINUX:
         load_program_memory(cpu, image_path, IMAGE_LOAD_ADDRESS);
-        load_program_memory(cpu, dtb_path, DTB_BASE_ADDRESS);
+        if(dtb_path) {
+            load_program_memory(cpu, dtb_path, DTB_BASE_ADDRESS);
+        }
 
         /* linux environment, Kernel boot conditions */
         register_write(cpu, 1, 0xffffffff);         //set r1
-        register_write(cpu, 2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
+        if(dtb_path) {
+            register_write(cpu, 2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
+        }
         register_write(cpu, 15, IMAGE_LOAD_ADDRESS);            //set pc, jump to Load Address
         break;
     case USE_BINARY:
