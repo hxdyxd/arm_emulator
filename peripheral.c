@@ -59,6 +59,60 @@ void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 
 /******************************memory*****************************************/
 
+/******************************memory*****************************************/
+void fs_reset(void *base)
+{
+    struct fs_t *fs = base;
+    if(fs->filename) {
+        fs->fp = fopen(fs->filename, "rb+");
+        printf("Open %s: %s\n", fs->filename, (fs->fp == NULL)?"err":"ok");
+    }
+}
+
+uint32_t fs_read(void *base, uint32_t address)
+{
+    struct fs_t *fs = base;
+    uint32_t data = 0;
+    if(fs->fp) {
+        fseek(fs->fp, address, SEEK_SET);
+        fread(&data, 4, 1, fs->fp);
+    }
+    return data;
+}
+
+void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
+{
+    struct fs_t *fs = base;
+    if(!fs->fp) {
+        return;
+    }
+    switch(mask) {
+    case 3:
+        {
+            fseek(fs->fp, address, SEEK_SET);
+            fwrite(&data, 4, 1, fs->fp);
+        }
+        break;
+    case 1:
+        {
+            fseek(fs->fp, address, SEEK_SET);
+            fwrite(&data, 2, 1, fs->fp);
+        }
+        break;
+    default:
+        {
+            fseek(fs->fp, address, SEEK_SET);
+            fwrite(&data, 1, 1, fs->fp);
+        }
+        break;
+    }
+}
+
+
+/******************************memory*****************************************/
+
+
+
 /******************************interrupt**************************************/
 
 

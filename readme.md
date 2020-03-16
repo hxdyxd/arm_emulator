@@ -15,8 +15,8 @@ simple armv4 emulator with freertos and linux support, only two thousand lines, 
 
 > ./arm_emulator -m bin -f arm_hello_gcc/hello.bin  
 > ./arm_emulator -m bin -f arm_freertos/hello.bin  
-> ./arm_emulator -m linux -f arm_linux/Image -t arm_linux/arm-emulator.dtb  
-> ./arm_emulator -m linux -f arm_linux/zImage.arm-emulator  
+> ./arm_emulator -m linux -f zImage -r rootfs.ext2  
+> ./arm_emulator -m linux -f Image -t arm-emulator.dtb -r rootfs.ext2  
 
 ## Usage
 
@@ -25,13 +25,16 @@ simple armv4 emulator with freertos and linux support, only two thousand lines, 
 
   arm_emulator
        -m <mode>                  Select 'linux' or 'bin' mode, default is 'bin'.
-       -f <image_path>            Set Image or Binary file path.
+       -f <image_path>            Set image or binary programme file path.
+       [-r <romfs_path>]          Set ROM filesystem path.
        [-t <device_tree_path>]    Set Devices tree path.
        [-d]                       Display debug message.
        [-s]                       Step by step mode.
 
        [-v]                       Verbose mode.
        [-h, --help]               Print this message.
+
+Reference: https://github.com/hxdyxd/arm_emulator
 ```
 
 ## Build linux zImage with buildroot

@@ -39,9 +39,12 @@
 #define UART_NUMBER    1
 
 
-
 struct peripheral_t {
     uint8_t memory[MEM_SIZE];
+    struct fs_t {
+        char *filename;
+        FILE *fp;
+    }fs;
 
     struct interrupt_register {
         uint32_t MSK; //Determine which interrupt source is masked.
@@ -76,6 +79,10 @@ struct peripheral_t {
 void memory_reset(void *base);
 uint32_t memory_read(void *base, uint32_t address);
 void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
+
+void fs_reset(void *base);
+uint32_t fs_read(void *base, uint32_t address);
+void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
 void intc_reset(void *base);
 uint32_t intc_read(void *base, uint32_t address);

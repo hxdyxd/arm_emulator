@@ -28,6 +28,7 @@
 #define IMAGE_LOAD_ADDRESS   (0x8000)
 #define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
 
+#define MAX_FS_SIZE   (0x2000000)   //32M
 
 //cpu memory
 struct armv4_cpu_t cpu_handle;
@@ -35,7 +36,7 @@ struct armv4_cpu_t cpu_handle;
 //peripheral register
 struct peripheral_t peripheral_reg_base;
 
-#define PERIPHERAL_NUMBER    (4)
+#define PERIPHERAL_NUMBER    (5)
 //peripheral address & function config
 struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
     {
@@ -45,6 +46,14 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .reset = memory_reset,
         .read = memory_read,
         .write = memory_write,
+    },
+    {
+        .mask = ~(MAX_FS_SIZE-1), //25bit
+        .prefix = 0x10000000,
+        .reg_base = &peripheral_reg_base.fs,
+        .reset = fs_reset,
+        .read = fs_read,
+        .write = fs_write,
     },
     {
         .mask = ~(8-1), //3bit
@@ -90,7 +99,7 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
         write_word(cpu, address, instruction);
         address = address + 4;
     }
-    WARN("load mem base 0x%x, size 0x%x\r\n", start, address - start - 4);
+    WARN("load mem base 0x%x, size %d\r\n", start, address - start - 4);
     fclose(fp);
     return address - start - 4;
 }
@@ -105,7 +114,9 @@ void usage(const char *file)
     printf(
         "       -m <mode>                  Select 'linux' or 'bin' mode, default is 'bin'.\n");
     printf(
-        "       -f <image_path>            Set Image or Binary file path.\n");
+        "       -f <image_path>            Set image or binary programme file path.\n");
+    printf(
+        "       [-r <romfs_path>]          Set ROM filesystem path.\n");
     printf(
         "       [-t <device_tree_path>]    Set Devices tree path.\n");
     printf(
@@ -132,10 +143,14 @@ int main(int argc, char **argv)
     uint8_t step_by_step = 0;
     int ch;
 
-    while((ch = getopt(argc, argv, "m:f:t:dshv")) != -1) {
+    peripheral_reg_base.fs.filename = NULL;
+    while((ch = getopt(argc, argv, "m:f:r:t:dshv")) != -1) {
         switch(ch) {
         case 't':
             dtb_path = optarg;
+            break;
+        case 'r':
+            peripheral_reg_base.fs.filename = optarg;
             break;
         case 'f':
             image_path = optarg;
