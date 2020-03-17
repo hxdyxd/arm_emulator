@@ -171,7 +171,6 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, cons
     uint32_t event = 0;
     struct interrupt_register *intc = &base->intc;
     struct timer_register *tim = &base->tim;
-    struct uart_register *uart = &base->uart[0];
     if(tim->EN && code_counter%kips_speed == 0 ) {
         //timer enable, int_controler enable, cpsr_irq not disable
         //per 10 millisecond timer irq
@@ -189,26 +188,32 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, cons
             code_counter_tmp = code_counter;
 #endif
             tick_timer = new_tick_timer;
-            event = interrupt_happen(intc, 0);
+            event = interrupt_happen(intc, tim->interrupt_id);
+            return event;
         }
-    } else if( (uart->IER&0xf) ) {
-        //uart enable, cpsr_irq not disable
-        //UART
-        if( (uart->IER&0x2) ) {
-            //Bit1, Enable Transmit Holding Register Empty Interrupt. 
-            if((event = interrupt_happen(intc, 1)) != 0) {
-                uart->IIR = 0x2; // THR empty
-            }
-        } else  if( (uart->IER&0x1) && code_counter%kips_speed == (kips_speed/2) && KBHIT() ) {
-            //Avoid calling kbhit functions frequently
-            //Bit0, Enable Received Data Available Interrupt. 
-            if((event = interrupt_happen(intc, 1)) != 0 ) {
-                uart->IIR = 0x4; //received data available
-                uart->LSR |= 1;
-            }
-        } else {
-            uart->IIR = 1; //no interrupt pending
-        }
+    } else {
+        for(int i=0; i<UART_NUMBER; i++) {
+            struct uart_register *uart = &base->uart[i];
+            if(uart->IER&0xf) {
+                //uart enable
+                uart->IIR = UART_IIR_NO_INT; //no interrupt pending
+                //UART
+                if( uart->IER & UART_IER_THRI ) {
+                    //Bit1, Enable Transmit Holding Register Empty Interrupt. 
+                    if((event = interrupt_happen(intc, uart->interrupt_id)) != 0) {
+                        uart->IIR = UART_IIR_THRI; // THR empty interrupt pending
+                    }
+                    return event;
+                } else  if( (uart->IER & UART_IER_RDI) && code_counter%kips_speed == (kips_speed/2) && uart->status() ) {
+                    //Avoid calling kbhit functions frequently
+                    //Bit0, Enable Received Data Available Interrupt. 
+                    if((event = interrupt_happen(intc, uart->interrupt_id)) != 0 ) {
+                        uart->IIR = UART_IIR_RDI; //received data available interrupt pending
+                    }
+                    return event;
+                }
+            } /*end if*/
+        } /*end for*/
     }
     return event;
 }
@@ -223,6 +228,7 @@ void tim_reset(void *base)
     struct timer_register *tim = base;
     tim->CNT = 0x00000000;
     tim->EN =  0x00000000;
+    printf("tim interrupt id: %d\n", tim->interrupt_id);
 }
 
 uint32_t tim_read(void *base, uint32_t address)
@@ -256,60 +262,22 @@ void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 /*******************************timer*****************************************/
 
 
-/*******************************earlyuart*****************************************/
-
-
-void earlyuart_reset(void *base)
-{
-    struct earlyuart_register *earlyuart = base;
-    earlyuart->FLAG = 0x00000001;
-    earlyuart->OUT =  0x00000000;
-}
-
-uint32_t earlyuart_read(void *base, uint32_t address)
-{
-    struct earlyuart_register *earlyuart = base;
-    switch(address) {
-    case 0x0:
-        return earlyuart->FLAG;
-    case 0x4:
-        return earlyuart->OUT;
-    default:
-        ;
-    }
-    return 0;
-}
-
-void earlyuart_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
-{
-    struct earlyuart_register *earlyuart = base;
-    switch(address) {
-    case 0x0:
-        earlyuart->FLAG = data;
-    case 0x4:
-        PUTCHAR(data);
-    default:
-        ;
-    }
-}
-
-
-/*******************************earlyuart*****************************************/
-
-
 /*******************************uart*****************************************/
 
 
 void uart_8250_reset(void *base) 
 {
     struct uart_register *uart = base;
-    memset(uart, 0, sizeof(struct uart_register));
-    uart->IIR = 0x01;
-    uart->LSR = 0x60;
+    uart->IER = 0;
+    uart->IIR = UART_IIR_NO_INT; //no interrupt pending
+    uart->LSR = UART_LSR_TEMT | UART_LSR_THRE; //THR empty
+    if(!uart->getchar || !uart->putchar || !uart->status) {
+        printf("uart_8250: function pointer = null\n");
+        exit(-1);
+    }
+    printf("uart_8250 interrupt id: %d\n", uart->interrupt_id);
 }
 
-#define UART_LCR_DLAB(uart)   ((uart)->LCR & 0x80)
-#define  register_set(r,b,v)  do{ if(v) {r |= 1 << (b);} else {r &= ~(1 << (b));} }while(0)
 
 uint32_t uart_8250_read(void *base, uint32_t address)
 {
@@ -317,19 +285,17 @@ uint32_t uart_8250_read(void *base, uint32_t address)
     //printf("uart read 0x%x\n", address);
     switch(address) {
     case 0x0:
-        if(UART_LCR_DLAB(uart)) {
+        if( uart->LCR & UART_LCR_DLAB ) {
             //Divisor Latch Low
             return uart->DLL;
         } else {
             //Receive Buffer Register
-            register_set(uart->LSR, 0, 0);
-            if( KBHIT() )
-                uart->RBR = GETCH();
+            uart->RBR = uart->getchar();
             return uart->RBR;
         }
         break;
     case 0x4:
-        if(UART_LCR_DLAB(uart)) {
+        if( uart->LCR & UART_LCR_DLAB ) {
             //Divisor Latch High
             return uart->DLH;
         } else {
@@ -348,6 +314,7 @@ uint32_t uart_8250_read(void *base, uint32_t address)
         return uart->MCR;
     case 0x14:
         //Line Status Register, read-only
+        register_set(uart->LSR, 0, uart->status()?1:0);
         return uart->LSR;
     case 0x18:
         //Modem Status Registe, read-only
@@ -369,16 +336,16 @@ void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
     //PRINTF("uart write 0x%x 0x%x\n", address, data);
     switch(address) {
     case 0x0:
-        if(UART_LCR_DLAB(uart)) {
+        if( uart->LCR & UART_LCR_DLAB ) {
             //Divisor Latch Low
             uart->DLL = data;
         } else {
             //Transmit Holding Register
-            PUTCHAR(data);
+            uart->putchar(data);
         }
         break;
     case 0x4:
-        if(UART_LCR_DLAB(uart)) {
+        if( uart->LCR & UART_LCR_DLAB ) {
             //Divisor Latch High
             uart->DLH = data;
         } else {
@@ -396,13 +363,9 @@ void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
         break;
     case 0x10:{
         //Modem Control Register
-        uint8_t lastmcr = uart->MCR;
         uart->MCR = data;
-        if( (uart->MCR&1) ^ (lastmcr&1) ) {
-            //set DSR
-            uart->MSR |=  (1<<1);
-        }
-        if( (uart->MCR&0x10) ) {
+
+        if( uart->MCR & UART_MCR_LOOP ) {
             //Loopback
             register_set(uart->MSR, 7, (uart->MCR&0x8) ); //Auxiliary output 2
             register_set(uart->MSR, 6, (uart->MCR&0x4) ); //Auxiliary output 1
@@ -416,10 +379,12 @@ void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
             //printf("Loopback msr = 0x%x\n", uart->MSR);
         } else {
             uart->MSR = 0;
-            register_set(uart->MSR, 5, 1);  //DSR准备就绪
-            register_set(uart->MSR, 4, 1);  //CTS有效
+            uart->MSR |= UART_MSR_DSR;
+            uart->MSR |= UART_MSR_CTS;
+            if( uart->MCR & UART_MCR_RTS ) {
+                //printf("RTS = 1, Cannot receive data\n");
+            }
         }
-        
         break;
     }
     case 0x14:

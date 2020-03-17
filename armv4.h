@@ -94,6 +94,7 @@ struct armv4_cpu_t {
         uint32_t number;
 
         struct peripheral_link_t {
+            char *name;
             uint32_t mask;
             uint32_t prefix;
             void *reg_base;

@@ -26,17 +26,14 @@
 
 /*******HAL*******/
 #include <time.h>
-#include <conio.h>
+#include <stdlib.h>
 
-#define  KBHIT()      kbhit()
-#define  GETCH()      getch()
-#define  PUTCHAR(c)   putchar(c)
 #define  GET_TICK()   (clock()*1000/CLOCKS_PER_SEC)
 /*******HAL END*******/
 
 
 #define MEM_SIZE   (0x2000000)  //32M
-#define UART_NUMBER    1
+#define UART_NUMBER    (2)
 
 
 struct peripheral_t {
@@ -52,29 +49,83 @@ struct peripheral_t {
     }intc;
 
     struct timer_register {
+        //predefined start
+        uint32_t interrupt_id;
+        //predefined end
+
         uint32_t CNT; //Determine which interrupt source is masked.
         uint32_t EN; //Indicate the interrupt request status
     }tim;
 
-    struct earlyuart_register {
-        uint32_t FLAG;
-        uint32_t OUT;
-    }earlyuart;
-
     struct uart_register {
+        //predefined start
+        int ( *status)(void);
+        int ( *getchar)(void);
+        int ( *putchar)(int ch);
+        uint32_t interrupt_id;
+        //predefined end
+
         uint32_t DLL; //Divisor Latch Low, 1
         uint32_t DLH; //Divisor Latch High, 2
         uint32_t IER; //Interrupt Enable Register, 1
+#define UART_IER_MSI        0x08 /* Enable Modem status interrupt */
+#define UART_IER_RLSI       0x04 /* Enable receiver line status interrupt */
+#define UART_IER_THRI       0x02 /* Enable Transmitter holding register int. */
+#define UART_IER_RDI        0x01 /* Enable receiver data interrupt */
         uint32_t IIR; //Interrupt Identity Register, 2
+#define UART_IIR_NO_INT     0x01 /* No interrupts pending */
+#define UART_IIR_ID         0x0e /* Mask for the interrupt ID */
+#define UART_IIR_MSI        0x00 /* Modem status interrupt */
+#define UART_IIR_THRI       0x02 /* Transmitter holding register empty */
+#define UART_IIR_RDI        0x04 /* Receiver data interrupt */
+#define UART_IIR_RLSI       0x06 /* Receiver line status interrupt */
         uint32_t FCR; //FIFO Control Register
         uint32_t LCR; //Line Control Register, 3
+#define UART_LCR_DLAB       0x80 /* Divisor latch access bit */
+#define UART_LCR_SBC        0x40 /* Set break control */
+#define UART_LCR_SPAR       0x20 /* Stick parity (?) */
+#define UART_LCR_EPAR       0x10 /* Even parity select */
+#define UART_LCR_PARITY     0x08 /* Parity Enable */
+#define UART_LCR_STOP       0x04 /* Stop bits: 0=1 bit, 1=2 bits */
+#define UART_LCR_WLEN5      0x00 /* Wordlength: 5 bits */
+#define UART_LCR_WLEN6      0x01 /* Wordlength: 6 bits */
+#define UART_LCR_WLEN7      0x02 /* Wordlength: 7 bits */
+#define UART_LCR_WLEN8      0x03 /* Wordlength: 8 bits */
         uint32_t MCR; //Modem Control Register, 4
+#define UART_MCR_CLKSEL     0x80 /* Divide clock by 4 (TI16C752, EFR[4]=1) */
+#define UART_MCR_TCRTLR     0x40 /* Access TCR/TLR (TI16C752, EFR[4]=1) */
+#define UART_MCR_XONANY     0x20 /* Enable Xon Any (TI16C752, EFR[4]=1) */
+#define UART_MCR_AFE        0x20 /* Enable auto-RTS/CTS (TI16C550C/TI16C750) */
+#define UART_MCR_LOOP       0x10 /* Enable loopback test mode */
+#define UART_MCR_OUT2       0x08 /* Out2 complement */
+#define UART_MCR_OUT1       0x04 /* Out1 complement */
+#define UART_MCR_RTS        0x02 /* RTS complement */
+#define UART_MCR_DTR        0x01 /* DTR complement */
         uint32_t LSR; //Line Status Register, 5
+#define UART_LSR_FIFOE      0x80 /* Fifo error */
+#define UART_LSR_TEMT       0x40 /* Transmitter empty */
+#define UART_LSR_THRE       0x20 /* Transmit-hold-register empty */
+#define UART_LSR_BI         0x10 /* Break interrupt indicator */
+#define UART_LSR_FE         0x08 /* Frame error indicator */
+#define UART_LSR_PE         0x04 /* Parity error indicator */
+#define UART_LSR_OE         0x02 /* Overrun error indicator */
+#define UART_LSR_DR         0x01 /* Receiver data ready */
         uint32_t MSR; //Modem Status Registe, 6
+#define UART_MSR_DCD        0x80 /* Data Carrier Detect */
+#define UART_MSR_RI         0x40 /* Ring Indicator */
+#define UART_MSR_DSR        0x20 /* Data Set Ready */
+#define UART_MSR_CTS        0x10 /* Clear to Send */
+#define UART_MSR_DDCD       0x08 /* Delta DCD */
+#define UART_MSR_TERI       0x04 /* Trailing edge ring indicator */
+#define UART_MSR_DDSR       0x02 /* Delta DSR */
+#define UART_MSR_DCTS       0x01 /* Delta CTS */
+#define UART_MSR_ANY_DELTA  0x0F /* Any of the delta bits! */
         uint32_t SCR;
         uint32_t RBR;
     }uart[UART_NUMBER];
 };
+
+#define  register_set(r,b,v)  do{ if(v) {r |= 1 << (b);} else {r &= ~(1 << (b));} }while(0)
 
 void memory_reset(void *base);
 uint32_t memory_read(void *base, uint32_t address);

@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <armv4.h>
 #include <peripheral.h>
+#include <conio.h>
 
 #include <unistd.h>
 
@@ -30,16 +31,51 @@
 
 #define MAX_FS_SIZE   (0x2000000)   //32M
 
+int uart2_status(void) 
+{
+    return 0;
+}
+
+int uart2_getchar(void)
+{
+    return 0;
+}
+
+int uart2_putchar(int ch)
+{
+    return putchar(ch);
+}
+
+
 //cpu memory
 struct armv4_cpu_t cpu_handle;
 
 //peripheral register
-struct peripheral_t peripheral_reg_base;
+struct peripheral_t peripheral_reg_base = {
+    .tim = {
+        .interrupt_id = 0,
+    },
+    .uart = {
+        {
+            .interrupt_id = 1,
+            .status = kbhit,
+            .getchar = getch,
+            .putchar = putchar,
+        },
+        {
+            .interrupt_id = 2,
+            .status = uart2_status,
+            .getchar = uart2_getchar,
+            .putchar = uart2_putchar,
+        },
+    },
+};
 
-#define PERIPHERAL_NUMBER    (5)
+#define PERIPHERAL_NUMBER    (6)
 //peripheral address & function config
 struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
     {
+        .name = "Ram",
         .mask = ~(MEM_SIZE-1), //25bit
         .prefix = 0x00000000,
         .reg_base = &peripheral_reg_base.memory[0],
@@ -48,6 +84,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = memory_write,
     },
     {
+        .name = "Romfs",
         .mask = ~(MAX_FS_SIZE-1), //25bit
         .prefix = 0x10000000,
         .reg_base = &peripheral_reg_base.fs,
@@ -56,6 +93,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = fs_write,
     },
     {
+        .name = "Interrupt controller",
         .mask = ~(8-1), //3bit
         .prefix = 0x4001f040,
         .reg_base = &peripheral_reg_base.intc,
@@ -64,6 +102,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = intc_write,
     },
     {
+        .name = "Timer",
         .mask = ~(8-1), //3bit
         .prefix = 0x4001f020,
         .reg_base = &peripheral_reg_base.tim,
@@ -72,6 +111,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = tim_write,
     },
     {
+        .name = "Uart0",
         .mask = ~(256-1), //8bit
         .prefix = 0x40020000,
         .reg_base = &peripheral_reg_base.uart[0],
@@ -79,6 +119,15 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .read = uart_8250_read,
         .write = uart_8250_write,
     },
+    {
+        .name = "Uart1",
+        .mask = ~(256-1), //8bit
+        .prefix = 0x40020100,
+        .reg_base = &peripheral_reg_base.uart[1],
+        .reset = uart_8250_reset,
+        .read = uart_8250_read,
+        .write = uart_8250_write,
+    }
 };
 
 
@@ -211,6 +260,7 @@ int main(int argc, char **argv)
     default:
         exit(-1);
     }
+    printf("Start...\n");
 
     for(;;) {
         cpu->code_counter++;
@@ -233,7 +283,7 @@ int main(int argc, char **argv)
             interrupt_exception(cpu, INT_EXCEPTION_DATAABT);
             cpu->mmu.mmu_fault = 0;
         } else {
-            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 40000)) {
+            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 65536)) {
                 interrupt_exception(cpu, INT_EXCEPTION_IRQ);
             }
         }
