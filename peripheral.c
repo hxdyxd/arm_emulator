@@ -19,10 +19,11 @@
 #include <peripheral.h>
 
 /******************************memory*****************************************/
-void memory_reset(void *base)
+uint32_t memory_reset(void *base)
 {
     uint8_t *memory = base;
     memset(memory, 0, MEM_SIZE);
+    return 1;
 }
 
 uint32_t memory_read(void *base, uint32_t address)
@@ -59,30 +60,66 @@ void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 
 /******************************memory*****************************************/
 
-/******************************memory*****************************************/
-void fs_reset(void *base)
+/******************************fs*****************************************/
+uint32_t fs_reset(void *base)
 {
     struct fs_t *fs = base;
+    uint32_t ret = 0;
     if(fs->filename) {
+#ifdef FS_MMAP_MODE
+        fs->fd = open(fs->filename, O_RDWR);
+        if(fs->fd < 0) {
+            printf("Open %s: err\n", fs->filename);
+            return ret;
+        }
+        fs->len = lseek(fs->fd, 0L, SEEK_END);
+        fs->map = mmap(0, fs->len, PROT_READ | PROT_WRITE, MAP_SHARED, fs->fd, 0);
+        if(fs->map == MAP_FAILED) {
+            printf("mmap %s: err\n", fs->filename);
+            close(fs->fd);
+            return ret;
+        }
+        ret = 1;
+        //munmap(fs->map, fs->len);
+        //close(fs->fd);
+#else
         fs->fp = fopen(fs->filename, "rb+");
-        printf("Open %s: %s\n", fs->filename, (fs->fp == NULL)?"err":"ok");
+        if(fs->fp == NULL) {
+            printf("Open %s: err\n", fs->filename);
+            return ret;
+        }
+        ret = 1;
+#endif
     }
+    return ret;
 }
 
 uint32_t fs_read(void *base, uint32_t address)
 {
     struct fs_t *fs = base;
+#ifdef FS_MMAP_MODE
+    if(fs->map && address < fs->len) {
+        return memory_read(fs->map, address);
+    }
+    return 0;
+#else
     uint32_t data = 0;
     if(fs->fp) {
         fseek(fs->fp, address, SEEK_SET);
         fread(&data, 4, 1, fs->fp);
     }
     return data;
+#endif
 }
 
 void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 {
     struct fs_t *fs = base;
+#ifdef FS_MMAP_MODE
+    if(fs->map && address < fs->len) {
+        memory_write(fs->map, address, data, mask);
+    }
+#else
     if(!fs->fp) {
         return;
     }
@@ -106,21 +143,23 @@ void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
         }
         break;
     }
+#endif
 }
 
 
-/******************************memory*****************************************/
+/******************************fs*****************************************/
 
 
 
 /******************************interrupt**************************************/
 
 
-void intc_reset(void *base)
+uint32_t intc_reset(void *base)
 {
     struct interrupt_register *intc = base;
     intc->MSK = 0xFFFFFFFF;
     intc->PND = 0x00000000;
+    return 1;
 }
 
 uint32_t intc_read(void *base, uint32_t address)
@@ -198,13 +237,13 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, cons
                 //uart enable
                 uart->IIR = UART_IIR_NO_INT; //no interrupt pending
                 //UART
-                if( uart->IER & UART_IER_THRI ) {
+                if( (uart->IER & UART_IER_THRI) && uart->writeable() ) {
                     //Bit1, Enable Transmit Holding Register Empty Interrupt. 
                     if((event = interrupt_happen(intc, uart->interrupt_id)) != 0) {
                         uart->IIR = UART_IIR_THRI; // THR empty interrupt pending
                     }
                     return event;
-                } else  if( (uart->IER & UART_IER_RDI) && code_counter%kips_speed == (kips_speed/2) && uart->status() ) {
+                } else  if( (uart->IER & UART_IER_RDI) && code_counter%kips_speed == (kips_speed/2) && uart->readable() ) {
                     //Avoid calling kbhit functions frequently
                     //Bit0, Enable Received Data Available Interrupt. 
                     if((event = interrupt_happen(intc, uart->interrupt_id)) != 0 ) {
@@ -223,12 +262,13 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, cons
 /*******************************timer*****************************************/
 
 
-void tim_reset(void *base)
+uint32_t tim_reset(void *base)
 {
     struct timer_register *tim = base;
     tim->CNT = 0x00000000;
     tim->EN =  0x00000000;
     printf("tim interrupt id: %d\n", tim->interrupt_id);
+    return 1;
 }
 
 uint32_t tim_read(void *base, uint32_t address)
@@ -263,19 +303,35 @@ void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 
 
 /*******************************uart*****************************************/
+int uart_8250_rw_enable(void)
+{
+    return 1;
+}
+
+int uart_8250_rw_disable(void)
+{
+    return 0;
+}
 
 
-void uart_8250_reset(void *base) 
+uint32_t uart_8250_reset(void *base) 
 {
     struct uart_register *uart = base;
     uart->IER = 0;
     uart->IIR = UART_IIR_NO_INT; //no interrupt pending
     uart->LSR = UART_LSR_TEMT | UART_LSR_THRE; //THR empty
-    if(!uart->getchar || !uart->putchar || !uart->status) {
+    if(!uart->read || !uart->write) {
         printf("uart_8250: function pointer = null\n");
-        exit(-1);
+        return 0;
+    }
+    if(!uart->readable) {
+        uart->readable = uart_8250_rw_disable;
+    }
+    if(!uart->writeable) {
+        uart->writeable = uart_8250_rw_disable;
     }
     printf("uart_8250 interrupt id: %d\n", uart->interrupt_id);
+    return 1;
 }
 
 
@@ -290,7 +346,7 @@ uint32_t uart_8250_read(void *base, uint32_t address)
             return uart->DLL;
         } else {
             //Receive Buffer Register
-            uart->RBR = uart->getchar();
+            uart->RBR = uart->read();
             return uart->RBR;
         }
         break;
@@ -314,7 +370,8 @@ uint32_t uart_8250_read(void *base, uint32_t address)
         return uart->MCR;
     case 0x14:
         //Line Status Register, read-only
-        register_set(uart->LSR, 0, uart->status()?1:0);
+        register_set(uart->LSR, 0, uart->readable()?1:0);
+        register_set(uart->LSR, 6, uart->writeable()?1:0);
         return uart->LSR;
     case 0x18:
         //Modem Status Registe, read-only
@@ -341,7 +398,7 @@ void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
             uart->DLL = data;
         } else {
             //Transmit Holding Register
-            uart->putchar(data);
+            uart->write(data);
         }
         break;
     case 0x4:

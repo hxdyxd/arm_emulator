@@ -34,13 +34,26 @@
 
 #define MEM_SIZE   (0x2000000)  //32M
 #define UART_NUMBER    (2)
+#define FS_MMAP_MODE
 
+
+#ifdef FS_MMAP_MODE
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#endif
 
 struct peripheral_t {
     uint8_t memory[MEM_SIZE];
     struct fs_t {
         char *filename;
+#ifdef FS_MMAP_MODE
+        int fd;
+        uint8_t *map;
+        uint32_t len;
+#else
         FILE *fp;
+#endif
     }fs;
 
     struct interrupt_register {
@@ -59,9 +72,10 @@ struct peripheral_t {
 
     struct uart_register {
         //predefined start
-        int ( *status)(void);
-        int ( *getchar)(void);
-        int ( *putchar)(int ch);
+        int ( *readable)(void);
+        int ( *read)(void);
+        int ( *writeable)(void);
+        int ( *write)(int ch);
         uint32_t interrupt_id;
         //predefined end
 
@@ -127,28 +141,26 @@ struct peripheral_t {
 
 #define  register_set(r,b,v)  do{ if(v) {r |= 1 << (b);} else {r &= ~(1 << (b));} }while(0)
 
-void memory_reset(void *base);
+uint32_t memory_reset(void *base);
 uint32_t memory_read(void *base, uint32_t address);
 void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
-void fs_reset(void *base);
+uint32_t fs_reset(void *base);
 uint32_t fs_read(void *base, uint32_t address);
 void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
-void intc_reset(void *base);
+uint32_t intc_reset(void *base);
 uint32_t intc_read(void *base, uint32_t address);
 void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, const uint32_t kips_speed);
 
-void tim_reset(void *base);
+uint32_t tim_reset(void *base);
 uint32_t tim_read(void *base, uint32_t address);
 void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
-void earlyuart_reset(void *base);
-uint32_t earlyuart_read(void *base, uint32_t address);
-void earlyuart_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
-
-void uart_8250_reset(void *base);
+int uart_8250_rw_enable(void);
+int uart_8250_rw_disable(void);
+uint32_t uart_8250_reset(void *base);
 uint32_t uart_8250_read(void *base, uint32_t address);
 void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 

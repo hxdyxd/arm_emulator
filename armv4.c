@@ -402,10 +402,9 @@ uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
     
     //1M Peripheral memory
     for(int i=0; i<cpu->peripheral.number; i++) {
-        if((address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
+        if(cpu->peripheral.link[i].read && (address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
             uint32_t offset = address - cpu->peripheral.link[i].prefix;
-            if(cpu->peripheral.link[i].read)
-                return cpu->peripheral.link[i].read(cpu->peripheral.link[i].reg_base, offset);
+            return cpu->peripheral.link[i].read(cpu->peripheral.link[i].reg_base, offset);
         }
     }
 
@@ -438,10 +437,9 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, ui
     
     //4G Peripheral memory
     for(int i=0; i<cpu->peripheral.number; i++) {
-        if((address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
+        if(cpu->peripheral.link[i].write && (address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
             uint32_t offset = address - cpu->peripheral.link[i].prefix;
-            if(cpu->peripheral.link[i].write)
-                cpu->peripheral.link[i].write(cpu->peripheral.link[i].reg_base, offset, data, mask);
+            cpu->peripheral.link[i].write(cpu->peripheral.link[i].reg_base, offset, data, mask);
             return;
         }
     }
@@ -1741,10 +1739,15 @@ void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link
     cpu->peripheral.link = link;
     cpu->peripheral.number = number;
     for(int i=0; i<cpu->peripheral.number; i++) {
-        WARN("[%d]%s register at 0x%08x, size %d\n",
-         i, cpu->peripheral.link[i].name, cpu->peripheral.link[i].prefix, (~cpu->peripheral.link[i].mask)+1);
         if(cpu->peripheral.link[i].reset) {
-            cpu->peripheral.link[i].reset(cpu->peripheral.link[i].reg_base);
+            if(cpu->peripheral.link[i].reset(cpu->peripheral.link[i].reg_base)) {
+                WARN("[%d]%s register at 0x%08x, size %d\n",
+                    i, cpu->peripheral.link[i].name, cpu->peripheral.link[i].prefix, (~cpu->peripheral.link[i].mask)+1);
+            } else {
+                cpu->peripheral.link[i].reset = NULL;
+                cpu->peripheral.link[i].read = NULL;
+                cpu->peripheral.link[i].write = NULL;
+            }
         }
     }
 }

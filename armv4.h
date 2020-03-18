@@ -98,7 +98,7 @@ struct armv4_cpu_t {
             uint32_t mask;
             uint32_t prefix;
             void *reg_base;
-            void (*reset)(void *base);
+            uint32_t (*reset)(void *base);
             uint32_t (*read)(void *base, uint32_t address);
             void (*write)(void *base, uint32_t address, uint32_t data, uint8_t mask);
         }*link;
