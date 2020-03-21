@@ -22,6 +22,8 @@
 #include <conio.h>
 
 #include <unistd.h>
+#include <slip_tun.h>
+
 
 #define USE_LINUX     0
 #define USE_BINARY    1
@@ -30,21 +32,6 @@
 #define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
 
 #define MAX_FS_SIZE   (0x2000000)   //32M
-
-int uart2_status(void) 
-{
-    return 0;
-}
-
-int uart2_getchar(void)
-{
-    return 0;
-}
-
-int uart2_putchar(int ch)
-{
-    return putchar(ch);
-}
 
 
 //cpu memory
@@ -58,15 +45,17 @@ struct peripheral_t peripheral_reg_base = {
     .uart = {
         {
             .interrupt_id = 1,
-            .status = kbhit,
-            .getchar = getch,
-            .putchar = putchar,
+            .readable = kbhit,
+            .read = getch,
+            .writeable = uart_8250_rw_enable,
+            .write = putchar,
         },
         {
             .interrupt_id = 2,
-            .status = uart2_status,
-            .getchar = uart2_getchar,
-            .putchar = uart2_putchar,
+            .readable = slip_tun_readable,
+            .read = slip_tun_read,
+            .writeable = slip_tun_writeable,
+            .write = slip_tun_write,
         },
     },
 };
@@ -78,7 +67,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .name = "Ram",
         .mask = ~(MEM_SIZE-1), //25bit
         .prefix = 0x00000000,
-        .reg_base = &peripheral_reg_base.memory[0],
+        .reg_base = &peripheral_reg_base.mem,
         .reset = memory_reset,
         .read = memory_read,
         .write = memory_write,
@@ -120,7 +109,7 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
         .write = uart_8250_write,
     },
     {
-        .name = "Uart1",
+        .name = "Uart1_slip",
         .mask = ~(256-1), //8bit
         .prefix = 0x40020100,
         .reg_base = &peripheral_reg_base.uart[1],
@@ -237,6 +226,7 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
+    slip_tun_init();
     cpu_init(cpu);
     peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
 
@@ -252,7 +242,7 @@ int main(int argc, char **argv)
         if(dtb_path) {
             register_write(cpu, 2, DTB_BASE_ADDRESS);  //set r2, dtb base Address
         }
-        register_write(cpu, 15, IMAGE_LOAD_ADDRESS);            //set pc, jump to Load Address
+        register_write(cpu, 15, IMAGE_LOAD_ADDRESS);   //set pc, jump to Load Address
         break;
     case USE_BINARY:
         load_program_memory(cpu, image_path, 0);

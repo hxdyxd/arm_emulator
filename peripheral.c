@@ -21,36 +21,40 @@
 /******************************memory*****************************************/
 uint32_t memory_reset(void *base)
 {
-    uint8_t *memory = base;
-    memset(memory, 0, MEM_SIZE);
+    struct memory_t *mem = base;
+    mem->addr = (uint8_t *)malloc(MEM_SIZE);
+    if(!mem->addr) {
+        printf("memory alloc error\n");
+        return 0;
+    }
     return 1;
 }
 
 uint32_t memory_read(void *base, uint32_t address)
 {
-    uint8_t *memory = base;
-    return *((int*)(memory + address));
+    struct memory_t *mem = base;
+    return *((int*)(mem->addr + address));
 }
 
 void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 {
-    uint8_t *memory = base;
+    struct memory_t *mem = base;
     switch(mask) {
     case 3:
         {    
-            int *data_p = (int *) (memory + address);
+            int *data_p = (int *) (mem->addr + address);
             *data_p = data;
         }
         break;
     case 1:
         {
-            short *data_p = (short *) (memory + address);
+            short *data_p = (short *) (mem->addr + address);
             *data_p = data;
         }
         break;
     default:
         {
-            char * data_p = (char *) (memory + address);
+            char * data_p = (char *) (mem->addr + address);
             *data_p = data;
         }
         break;

@@ -32,9 +32,8 @@
 /*******HAL END*******/
 
 
-#define MEM_SIZE   (0x2000000)  //32M
+#define MEM_SIZE   (1 << 25)  //32M
 #define UART_NUMBER    (2)
-#define FS_MMAP_MODE
 
 
 #ifdef FS_MMAP_MODE
@@ -44,7 +43,9 @@
 #endif
 
 struct peripheral_t {
-    uint8_t memory[MEM_SIZE];
+    struct memory_t {
+        uint8_t *addr;
+    }mem;
     struct fs_t {
         char *filename;
 #ifdef FS_MMAP_MODE

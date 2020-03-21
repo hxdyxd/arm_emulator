@@ -1,6 +1,6 @@
 # Makefile of arm_emulator
 # Copyright (C) 2019-2020  hxdyxd <hxdyxd@gmail.com>
-CC = gcc
+CC = $(CROSS_COMPILE)gcc
 
 
 TARGET = arm_emulator
@@ -15,17 +15,21 @@ slip_tun.c
 
 C_INCLUDES =  \
 -I./
+C_FLAGS = -Os -Wall -std=gnu99 
+C_DFLAG =  -D_BSD_SOURCE -D_DEFAULT_SOURCE -DTUN_SUPPORT 
+#-DFS_MMAP_MODE bug...
 
-CFLAGS = -Os -Wall -std=gnu99 -D_BSD_SOURCE -D_DEFAULT_SOURCE $(C_INCLUDES) -DTUN_SUPPORT
+
+LIB_NAME = -lpthread
 
 
 OBJS = $(patsubst %.c,%.o,$(C_SRCS))
 
 all: $(OBJS)
-	$(CC) $(CFLAGS)  -o $(TARGET)   $(OBJS) -lpthread
+	$(CC) $(C_FLAGS) $(C_DFLAG)  -o $(TARGET)   $(OBJS) $(LIB_NAME)
 
 %.o:%.c
-	$(CC) $(CFLAGS) -c $< -o $@
+	$(CC) $(C_FLAGS) $(C_DFLAG) $(C_INCLUDES) -o $@ -c $<
 
 clean:
 	rm -f $(TARGET) $(OBJS) $(TUN_OBJS)

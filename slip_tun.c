@@ -45,8 +45,8 @@
 
 int tun_out_task_start(void);
 
-#define BUF_SIZE      (4000)
-#define FIFO_SIZE     (512)
+#define BUF_SIZE      (1800)
+#define FIFO_SIZE     (2048)
 struct __kfifo send_fifo;
 uint8_t send_fifo_buffer[FIFO_SIZE];
 struct __kfifo recv_fifo;
@@ -109,7 +109,7 @@ static volatile uint8_t tun_out_task_run_flag = 0;
 void send_char(int ch)
 {
     while(__kfifo_in(&send_fifo, &ch, 1) == 0 && tun_out_task_run_flag) {
-        usleep(200);
+        usleep(20);
     }
 }
 
@@ -124,7 +124,7 @@ int recv_char(void)
 {
     uint8_t ch;
     while(__kfifo_out(&recv_fifo, &ch, 1) == 0 && slip_out_task_run_flag) {
-        usleep(200);
+        usleep(20);
     }
     return ch;
 }
@@ -416,6 +416,8 @@ int recv_packet(unsigned char *p, int len)
            default:
                 if(received < len)
                     p[received++] = c;
+                else
+                    return received;
         }
     }
     return received;
