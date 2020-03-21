@@ -18,43 +18,46 @@
  */
 #include <peripheral.h>
 
+
 /******************************memory*****************************************/
 uint32_t memory_reset(void *base)
 {
-    struct memory_t *mem = base;
-    mem->addr = (uint8_t *)malloc(MEM_SIZE);
-    if(!mem->addr) {
+    uint8_t **mem = base;
+    *mem = (uint8_t *)malloc(MEM_SIZE);
+    if(!*mem) {
         printf("memory alloc error\n");
         return 0;
     }
     return 1;
 }
 
+
 uint32_t memory_read(void *base, uint32_t address)
 {
-    struct memory_t *mem = base;
-    return *((int*)(mem->addr + address));
+    uint8_t **mem = base;
+    return *((int*)(*mem + address));
 }
+
 
 void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 {
-    struct memory_t *mem = base;
+    uint8_t **mem = base;
     switch(mask) {
     case 3:
         {    
-            int *data_p = (int *) (mem->addr + address);
+            int *data_p = (int *) (*mem + address);
             *data_p = data;
         }
         break;
     case 1:
         {
-            short *data_p = (short *) (mem->addr + address);
+            short *data_p = (short *) (*mem + address);
             *data_p = data;
         }
         break;
     default:
         {
-            char * data_p = (char *) (mem->addr + address);
+            char * data_p = (char *) (*mem + address);
             *data_p = data;
         }
         break;
@@ -98,12 +101,13 @@ uint32_t fs_reset(void *base)
     return ret;
 }
 
+
 uint32_t fs_read(void *base, uint32_t address)
 {
     struct fs_t *fs = base;
 #ifdef FS_MMAP_MODE
     if(fs->map && address < fs->len) {
-        return memory_read(fs->map, address);
+        return memory_read(&fs->map, address);
     }
     return 0;
 #else
@@ -116,12 +120,13 @@ uint32_t fs_read(void *base, uint32_t address)
 #endif
 }
 
+
 void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 {
     struct fs_t *fs = base;
 #ifdef FS_MMAP_MODE
     if(fs->map && address < fs->len) {
-        memory_write(fs->map, address, data, mask);
+        memory_write(&fs->map, address, data, mask);
     }
 #else
     if(!fs->fp) {
@@ -166,6 +171,7 @@ uint32_t intc_reset(void *base)
     return 1;
 }
 
+
 uint32_t intc_read(void *base, uint32_t address)
 {
     struct interrupt_register *intc = base;
@@ -179,6 +185,7 @@ uint32_t intc_read(void *base, uint32_t address)
     }
     return 0;
 }
+
 
 void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 {
@@ -195,6 +202,7 @@ void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 
 #define  int_is_set(v, bit) ( ((v)>>(bit))&1 )
 
+
 static uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id)
 {
     if( int_is_set(intc->MSK, id) || int_is_set(intc->PND, id) ) {
@@ -204,6 +212,7 @@ static uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id)
     intc->PND |= 1 << id;
     return 1;
 }
+
 
 /*
  * user_event: interrupt request
@@ -261,6 +270,7 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, cons
     return event;
 }
 
+
 /******************************interrupt**************************************/
 
 /*******************************timer*****************************************/
@@ -274,6 +284,7 @@ uint32_t tim_reset(void *base)
     printf("tim interrupt id: %d\n", tim->interrupt_id);
     return 1;
 }
+
 
 uint32_t tim_read(void *base, uint32_t address)
 {
@@ -289,6 +300,7 @@ uint32_t tim_read(void *base, uint32_t address)
     }
     return 0;
 }
+
 
 void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 {
@@ -307,10 +319,12 @@ void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 
 
 /*******************************uart*****************************************/
+
 int uart_8250_rw_enable(void)
 {
     return 1;
 }
+
 
 int uart_8250_rw_disable(void)
 {
@@ -390,6 +404,7 @@ uint32_t uart_8250_read(void *base, uint32_t address)
     }
     return 0;
 }
+
 
 void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 {

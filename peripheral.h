@@ -43,9 +43,8 @@
 #endif
 
 struct peripheral_t {
-    struct memory_t {
-        uint8_t *addr;
-    }mem;
+    uint8_t *mem;
+
     struct fs_t {
         char *filename;
 #ifdef FS_MMAP_MODE
