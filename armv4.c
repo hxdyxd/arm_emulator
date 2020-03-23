@@ -184,7 +184,8 @@ static void exception_out(struct armv4_cpu_t *cpu)
  *  uint8_t privileged:   privileged: 1, user: 0
  * author:hxdyxd
  */
-static inline int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap, uint8_t privileged, uint8_t wr)
+static inline int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap,
+ uint8_t privileged, uint8_t wr)
 {
     switch(ap) {
     case 0:
@@ -217,7 +218,8 @@ static inline int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap, ui
  *  uint8_t privileged:   privileged: 1, user: 0
  * author:hxdyxd
  */
-static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr, uint8_t privileged, uint8_t wr)
+static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
+ uint8_t privileged, uint8_t wr)
 {
     struct mmu_t *mmu = &cpu->mmu;
     mmu->mmu_fault = 0;
@@ -229,7 +231,8 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr, uin
         
     }
     //section page table, store size 16KB
-    uint32_t page_table_entry = read_word_without_mmu(cpu, (cp15_ttb(mmu)&0xFFFFC000)|((vaddr&0xFFF00000) >> 18));
+    uint32_t page_table_entry = read_word_without_mmu(cpu,
+     (cp15_ttb(mmu)&0xFFFFC000) | ((vaddr&0xFFF00000) >> 18));
     uint8_t first_level_descriptor = page_table_entry&3;
     if(first_level_descriptor == 0) {
         //Section translation fault
@@ -278,10 +281,12 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr, uin
         domainval = (cp15_domain(mmu) >> domainval)&0x3;
         if(first_level_descriptor == 1) {
             //coarse page table, store size 1KB
-            page_table_entry = read_word_without_mmu(cpu, (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10));
+            page_table_entry = read_word_without_mmu(cpu,
+             (page_table_entry&0xFFFFFC00)|((vaddr&0x000FF000) >> 10));
         } else if(first_level_descriptor == 3) {
             //fine page table, store size 4KB
-            page_table_entry = read_word_without_mmu(cpu, (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8));
+            page_table_entry = read_word_without_mmu(cpu,
+             (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8));
         } else {
             WARN("mmu fault\r\n");
             exception_out(cpu);
@@ -388,7 +393,8 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr, uin
  * read_mem
  * author:hxdyxd
  */
-uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint8_t mmu, uint8_t mask)
+uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
+ uint8_t mmu, uint8_t mask)
 {
     if(address&mask) {
         //Check address alignment
@@ -425,7 +431,8 @@ uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
  * write_mem
  * author:hxdyxd
  */
-void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint32_t data,  uint8_t mask)
+void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
+ uint32_t data,  uint8_t mask)
 {
     if(address&mask) {
         //Check address alignment
@@ -461,7 +468,8 @@ void interrupt_exception(struct armv4_cpu_t *cpu, uint8_t type)
     struct mmu_t *mmu = &cpu->mmu;
     uint32_t cpsr_int = cpsr(cpu);
     uint32_t next_pc = register_read(cpu, 15) - 4;  //lr 
-    PRINTF("[INT %d]cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri \r\n", type, cpsr_int, next_pc);
+    PRINTF("[INT %d]cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri \r\n",
+     type, cpsr_int, next_pc);
     switch(type) {
     case INT_EXCEPTION_IRQ:
         //irq
@@ -625,8 +633,7 @@ void decode(struct armv4_cpu_t *cpu)
     uint8_t Bit24_23;
 
 
-    uint8_t f = 0;
-    f = (dec->instruction_word >> 25)&0x7;  /* bit[27:25] */
+    uint8_t f = (dec->instruction_word >> 25)&0x7;  /* bit[27:25] */
     opcode = (dec->instruction_word >> 21)&0xf;  /* bit[24:21] */
     Bit24_23 = opcode >> 2;  /* bit[24:23] */
     Bit22 = IS_SET(dec->instruction_word, 22);  /* bit[22] */
@@ -651,13 +658,13 @@ void decode(struct armv4_cpu_t *cpu)
                 uint8_t Bit7 = (dec->instruction_word&0x80) >> 7;  /* bit[7] */
                 if(Bit21 && !Bit7) {
                     code_type = code_is_msr0;
-                    PRINTF("msr0 MSR %sPSR_%d  R%d\r\n", Bit22?"S":"C", Rn, Rm);
+                    PRINTF("msr0 %sPSR_%d  R%d\r\n", Bit22?"S":"C", Rn, Rm);
                 } else if(!Bit21 && !Bit7) {
                     code_type = code_is_mrs;
-                    PRINTF("mrs MRS R%d %s\r\n", Rd, Bit22?"SPSR":"CPSR");
+                    PRINTF("mrs R%d %s\r\n", Rd, Bit22?"SPSR":"CPSR");
                 } else {
                     code_type = code_is_unknow;
-                    printf(" undefed bit7 error \r\n");
+                    ERROR("undefined bit7 error \r\n");
                 }
             } else {
                 //Data processing register shift by immediate
@@ -868,7 +875,7 @@ void decode(struct armv4_cpu_t *cpu)
             
         } else {
             code_type = code_is_unknow;
-            printf("undefined instruction\r\n");
+            ERROR("undefined instruction\r\n");
         }
         break;
     case 4:
@@ -899,7 +906,7 @@ void decode(struct armv4_cpu_t *cpu)
     case 6:
         //Coprocessor load/store and double register transfers
         code_type = code_is_unknow;
-        printf("Coprocessor todo... \r\n");
+        WARN("Coprocessor todo... \r\n");
         exception_out(cpu);
         break;
     case 7:
@@ -913,14 +920,14 @@ void decode(struct armv4_cpu_t *cpu)
                 code_type = code_is_mcr;
                 PRINTF("mcr \r\n");
             } else {
-                printf("Coprocessor data processing todo... \r\n");
+                WARN("Coprocessor data processing todo... \r\n");
                 exception_out(cpu);
             }
         }
         break;
     default:
         code_type = code_is_unknow;
-        printf("undefed\r\n");
+        WARN("unsupported code\r\n");
         exception_out(cpu);
     }
 
@@ -1086,8 +1093,7 @@ void decode(struct armv4_cpu_t *cpu)
                     register_write(cpu, Rd, cp15_val);
                     PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, Rn, cp15_val, op2, Rd);
                 } else {
-                    printf("read cp%d_c%d \r\n", Rs, Rn);
-                    getchar();
+                    ERROR("read unsupported cp%d_c%d \r\n", Rs, Rn);
                 }
             } else {
                 //mcr
@@ -1096,8 +1102,7 @@ void decode(struct armv4_cpu_t *cpu)
                     cp15_write(&cpu->mmu, Rn, register_val);
                     PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, Rs, Rn);
                 } else {
-                    printf("write to cp%d_c%d \r\n", Rs, Rn);
-                    getchar();
+                    ERROR("write unsupported cp%d_c%d \r\n", Rs, Rn);
                 }
             }
             return;
@@ -1105,10 +1110,6 @@ void decode(struct armv4_cpu_t *cpu)
         break;
     case code_is_swp:
         do {
-            if(operand1 & 3) {
-                printf("swp error \r\n");
-                getchar();
-            }
             /* op1, Rn
              * op2, Rm
              */
@@ -1123,8 +1124,7 @@ void decode(struct armv4_cpu_t *cpu)
         }while(0);
         break;
     default:
-        printf("unknow code_type = %d", code_type);
-        getchar();
+        ERROR("unsupported code_type = %d", code_type);
         break;
     }
     
@@ -1429,8 +1429,7 @@ void decode(struct armv4_cpu_t *cpu)
         }
         
         if(aluout&3) {
-            printf("thumb unsupport \r\n");
-            getchar();
+            ERROR("thumb unsupport \r\n");
         }
         register_write(cpu, 15, aluout & 0xfffffffc);  //PC register
         PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
@@ -1480,10 +1479,6 @@ void decode(struct armv4_cpu_t *cpu)
                 data = read_byte(cpu, address);
             } else {
                 //Word
-                if((address&0x3) != 0) {
-                    printf("ldr unsupported address = 0x%x\n", address);
-                    getchar();
-                }
                 data = read_word(cpu, address);
             }
             

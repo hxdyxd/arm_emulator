@@ -13,8 +13,8 @@ simple armv4 emulator with freertos and linux support, only two thousand lines, 
 
 ## Usage Example
 
-> ./arm_emulator -m bin -f arm_hello_gcc/hello.bin  
-> ./arm_emulator -m bin -f arm_freertos/hello.bin  
+> ./arm_emulator -m bin -f hello.bin  
+> ./arm_emulator -m bin -f hello.bin  
 > ./arm_emulator -m linux -f zImage -r rootfs.ext2  
 > ./arm_emulator -m linux -f Image -t arm-emulator.dtb -r rootfs.ext2  
 

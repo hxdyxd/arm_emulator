@@ -28,14 +28,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/select.h>
-#include <sys/time.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <linux/if_tun.h>
+
+//struct ifreq ifr;
 #include <linux/if.h>
 
 
@@ -186,7 +181,6 @@ int slip_out_task_stop(void)
     if (slip_out_task_run_flag == 1) {
         slip_out_task_run_flag = 0;
         pthread_join(gs_slip_out_task_pthread_id, 0);
-        //APP_DEBUG("slip out task exit success!\n");
     } else {
         ERROR_PRINTF("slip out task failed!\n");
         return -1;
@@ -259,7 +253,6 @@ int tun_out_task_stop(void)
     if (tun_out_task_run_flag == 1) {
         tun_out_task_run_flag = 0;
         pthread_join(gs_tun_out_task_pthread_id, 0);
-        //APP_DEBUG("slip out task exit success!\n");
     } else {
         ERROR_PRINTF("tun out task failed!\n");
         return -1;
