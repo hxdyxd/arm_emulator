@@ -24,18 +24,26 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+static struct termios conio_orig_termios;
+static int conio_oldf;
+
+static inline void disable_raw_mode()
+{
+    tcsetattr(STDIN_FILENO, TCSANOW, &conio_orig_termios);
+    fcntl(STDIN_FILENO, F_SETFL, conio_oldf);
+}
 
 static inline void enable_raw_mode(void)
 {
-    struct termios term;
-    int oldf;
+    atexit(disable_raw_mode);
 
-    tcgetattr(0, &term);
+    tcgetattr(STDIN_FILENO, &conio_orig_termios);
+    struct termios term = conio_orig_termios;
     term.c_lflag &= ~(ICANON | ECHO); // Disable echo as well
-    tcsetattr(0, TCSANOW, &term);
+    tcsetattr(STDIN_FILENO, TCSANOW, &term);
 
-    oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
-    fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+    conio_oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, conio_oldf | O_NONBLOCK);
 }
 
 static inline int kbhit(void)

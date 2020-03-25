@@ -131,8 +131,8 @@ void send_packet(unsigned char *p, int len);
 int recv_packet(unsigned char *p, int len);
 #if CHECK_SUM_ON
 //Checksum
-int if_api_calculate_checksum(void *buf, unsigned int len);
-int if_api_check(void *buf, unsigned int len);
+int if_api_calculate_checksum(void *buf, int len);
+int if_api_check(void *buf, int len);
 #endif
 
 static pthread_t gs_slip_out_task_pthread_id;
@@ -197,7 +197,7 @@ void *tun_out_task_proc(void *par)
     int tun_fd = *(int *)par;
     DEBUG_PRINTF("tun out task enter success %d!\n", tun_fd);
     while(tun_out_task_run_flag) {
-        int total_len = read(tun_fd, tun_out_buffer, BUF_SIZE);
+        int total_len = read(tun_fd, tun_out_buffer, BUF_SIZE-2);
 #if 0
         DEBUG_PRINTF("TUN R=%d\n", total_len);
 #endif
@@ -418,40 +418,35 @@ int recv_packet(unsigned char *p, int len)
 
 
 #if CHECK_SUM_ON
-int if_api_calculate_checksum(void *buf, unsigned int len)
+int if_api_calculate_checksum(void *buf, int len)
 {
-    unsigned char *p = (unsigned char *)buf;
-    unsigned int sum = 0;
-    unsigned int i;
-    for(i=0;i<len;i++,p++)
-        sum += *p;
-#ifdef DEBUG_CHECKSUM
-    printf("sum = %d \r\n", sum);
-#endif
-    sum = (sum % 65536) ^ 0xffff;
-#ifdef DEBUG_CHECKSUM
-    printf("rev.hex = 0x%04x \r\n", sum);
-#endif
-    *p = (sum & 0x7f00) >> 8;
-    p++;
+    uint8_t *p = (uint8_t *)buf;
+    uint16_t sum = 0;
+    int l = len;
+    while(l--)
+        sum += *p++;
+    sum = ~sum;
+
+    *p++ = (sum >> 8) & 0x7f;
     *p = sum & 0x7f;
     return len + 2;
 }
 
-int if_api_check(void *buf, unsigned int len)
+int if_api_check(void *buf, int len)
 {
-    unsigned char *p = (unsigned char *)buf;
+    uint8_t *p = (uint8_t *)buf;
     if(len < 2)
         return -1;
-    uint8_t chechsum_low = p[len-1];
-    uint8_t chechsum_high = p[len-2];
-    p[len-1] = 0;
-    p[len-2] = 0;
-    if_api_calculate_checksum(p, len-2);
+    len -= 2;
+    uint8_t chechsum_low = p[len+1];
+    uint8_t chechsum_high = p[len];
+    p[len+1] = 0;
+    p[len] = 0;
+    if_api_calculate_checksum(p, len);
 
-    if(chechsum_low != p[len-1] || chechsum_high != p[len-2])
+    if(chechsum_low != p[len+1] || chechsum_high != p[len])
         return -1;
-    return len - 2;
+    return len;
 }
 #endif /* CHECK_SUM_ON */
 
