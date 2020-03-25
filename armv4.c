@@ -177,7 +177,10 @@ static void exception_out(struct armv4_cpu_t *cpu)
 //high vectors
 #define  cp15_ctl_v(mmu)  IS_SET(cp15_ctl(mmu), 13)
 
-
+/*
+ *  return 1, mmu fault
+ */
+#define mmu_check_status(mmu)   (mmu)->mmu_fault
 
 /*
  *  uint8_t wr:                write: 1, read: 0
@@ -462,7 +465,14 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
     exception_out(cpu);
 }
 
-
+/*
+ * uint8_t type:
+ * INT_EXCEPTION_UNDEF
+ * INT_EXCEPTION_SWI
+ * INT_EXCEPTION_PREABT
+ * INT_EXCEPTION_DATAABT
+ * INT_EXCEPTION_IRQ
+ */
 void interrupt_exception(struct armv4_cpu_t *cpu, uint8_t type)
 {
     struct mmu_t *mmu = &cpu->mmu;
@@ -471,6 +481,50 @@ void interrupt_exception(struct armv4_cpu_t *cpu, uint8_t type)
     PRINTF("[INT %d]cpsr(0x%x) save to spsr, next_pc(0x%x) save to r14_pri \r\n",
      type, cpsr_int, next_pc);
     switch(type) {
+    case INT_EXCEPTION_UNDEF:
+        //UNDEF
+        PRINTF("UNDEF\r\n");
+        register_write(cpu, 15, 0x4|(cp15_ctl_v(mmu)?0xffff0000:0));
+        cpsr_i_set(cpu, 1);  //disable irq
+        cpsr_t_set(cpu, 0);  //arm mode
+        cpsr(cpu) &= ~0x1f;
+        cpsr(cpu) |= CPSR_M_UND;
+        cpu->spsr[CPU_MODE_Undef] = cpsr_int;  //write SPSR_Undef
+        register_write(cpu, 14, next_pc);  //write R14_Undef
+        break;
+    case INT_EXCEPTION_SWI:
+        //swi
+        PRINTF("SVC\r\n");
+        register_write(cpu, 15, 0x8|(cp15_ctl_v(mmu)?0xffff0000:0));
+        cpsr_i_set(cpu, 1);  //disable irq
+        cpsr_t_set(cpu, 0);  //arm mode
+        cpsr(cpu) &= ~0x1f;
+        cpsr(cpu) |= CPSR_M_SVC;
+        cpu->spsr[CPU_MODE_SVC] = cpsr_int;  //write SPSR_svc
+        register_write(cpu, 14, next_pc);  //write R14_svc
+        break;
+    case INT_EXCEPTION_PREABT:
+        //preAbt
+        PRINTF("PREABT\r\n");
+        register_write(cpu, 15, 0xc|(cp15_ctl_v(mmu)?0xffff0000:0));
+        cpsr_i_set(cpu, 1);  //disable irq
+        cpsr_t_set(cpu, 0);  //arm mode
+        cpsr(cpu) &= ~0x1f;
+        cpsr(cpu) |= CPSR_M_ABT;
+        cpu->spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
+        register_write(cpu, 14, next_pc + 0);  //write R14_abt
+        break;
+    case INT_EXCEPTION_DATAABT:
+        //dataAbt
+        PRINTF("DATAABT\r\n");
+        register_write(cpu, 15, 0x10|(cp15_ctl_v(mmu)?0xffff0000:0));
+        cpsr_i_set(cpu, 1);  //disable irq
+        cpsr_t_set(cpu, 0);  //arm mode
+        cpsr(cpu) &= ~0x1f;
+        cpsr(cpu) |= CPSR_M_ABT;
+        cpu->spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
+        register_write(cpu, 14, next_pc + 4);  //write R14_abt
+        break;
     case INT_EXCEPTION_IRQ:
         //irq
         if(cpsr_i(cpu)) {
@@ -484,39 +538,6 @@ void interrupt_exception(struct armv4_cpu_t *cpu, uint8_t type)
         cpsr(cpu) |= CPSR_M_IRQ;
         cpu->spsr[CPU_MODE_IRQ] = cpsr_int;  //write SPSR_irq
         register_write(cpu, 14, next_pc + 4);  //write R14_irq
-        break;
-    case INT_EXCEPTION_PREABT:
-        //preAbt
-        PRINTF("PREABT\r\n");
-        register_write(cpu, 15, 0xc|(cp15_ctl_v(mmu)?0xffff0000:0));
-        cpsr_i_set(cpu, 1);  //disable irq
-        cpsr_t_set(cpu, 0);  //arm mode
-        cpsr(cpu) &= ~0x1f;
-        cpsr(cpu) |= CPSR_M_ABT;
-        cpu->spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
-        register_write(cpu, 14, next_pc + 0);  //write R14_abt
-        break;
-    case INT_EXCEPTION_SWI:
-        //swi
-        PRINTF("SVC\r\n");
-        register_write(cpu, 15, 0x8|(cp15_ctl_v(mmu)?0xffff0000:0));
-        cpsr_i_set(cpu, 1);  //disable irq
-        cpsr_t_set(cpu, 0);  //arm mode
-        cpsr(cpu) &= ~0x1f;
-        cpsr(cpu) |= CPSR_M_SVC;
-        cpu->spsr[CPU_MODE_SVC] = cpsr_int;  //write SPSR_svc
-        register_write(cpu, 14, next_pc);  //write R14_svc
-        break;
-    case INT_EXCEPTION_DATAABT:
-        //dataAbt
-        PRINTF("DATAABT\r\n");
-        register_write(cpu, 15, 0x10|(cp15_ctl_v(mmu)?0xffff0000:0));
-        cpsr_i_set(cpu, 1);  //disable irq
-        cpsr_t_set(cpu, 0);  //arm mode
-        cpsr(cpu) &= ~0x1f;
-        cpsr(cpu) |= CPSR_M_ABT;
-        cpu->spsr[CPU_MODE_Abort] = cpsr_int;  //write SPSR_abt
-        register_write(cpu, 14, next_pc + 4);  //write R14_abt
         break;
     default:
         WARN("unknow interrupt\r\n");
@@ -616,7 +637,6 @@ void decode(struct armv4_cpu_t *cpu)
     
 
 
-    uint8_t code_type;
 
     uint8_t Rn;
     uint8_t Rd;
@@ -646,8 +666,8 @@ void decode(struct armv4_cpu_t *cpu)
     shift = (dec->instruction_word >> 5)&0x3;  /* bit[6:5] */
     Bit4 = IS_SET(dec->instruction_word, 4);  /* bit[4] */
     Rm = (dec->instruction_word&0xF);  /* bit[3:0] */
-    code_type = code_is_unknow;
-    
+
+    uint8_t code_type = code_is_unknow;
     switch(f) {
     case 0:
         switch(Bit4) {
@@ -663,8 +683,7 @@ void decode(struct armv4_cpu_t *cpu)
                     code_type = code_is_mrs;
                     PRINTF("mrs R%d %s\r\n", Rd, Bit22?"SPSR":"CPSR");
                 } else {
-                    code_type = code_is_unknow;
-                    ERROR("undefined bit7 error \r\n");
+                    //ERROR("undefined bit7 error \r\n");
                 }
             } else {
                 //Data processing register shift by immediate
@@ -686,19 +705,15 @@ void decode(struct armv4_cpu_t *cpu)
                         PRINTF("bx B%sX R%d\r\n", Lf?"L":"", Rm);
                     } else if(IS_SET(dec->instruction_word, 6) && !IS_SET(dec->instruction_word, 5) ) {
                         //Enhanced DSP add/subtracts
-                        code_type = code_is_unknow;
-                        printf("Enhanced DSP add/subtracts R%d\r\n", Rm);
+                        //ERROR("Enhanced DSP add/subtracts R%d\r\n", Rm);
                     } else if(IS_SET(dec->instruction_word, 6) && IS_SET(dec->instruction_word, 5)) {
                         //Software breakpoint
-                        code_type = code_is_unknow;
-                        printf("Software breakpoint \r\n");
+                        //ERROR("Software breakpoint \r\n");
                     } else if(!IS_SET(dec->instruction_word, 6) && !IS_SET(dec->instruction_word, 5) && opcode == 0xb) {
                         //Count leading zero
-                        code_type = code_is_unknow;
-                        printf("Count leading zero \r\n");
+                        //ERROR("Count leading zero \r\n");
                     } else {
-                        code_type = code_is_unknow;
-                        printf("Undefed Miscellaneous instructions\r\n");
+                        //ERROR("Undefed Miscellaneous instructions\r\n");
                     }
                 } else {
                     //Data processing register shift by register
@@ -778,7 +793,8 @@ void decode(struct armv4_cpu_t *cpu)
                         }
                     }
                     if(!Lf) {
-                        ERROR("undefed LDRD\r\n");
+                        code_type = code_is_unknow;
+                        //ERROR("undefed LDRD\r\n");
                     }
                     break;
                 case 3:
@@ -804,22 +820,23 @@ void decode(struct armv4_cpu_t *cpu)
                         }
                     }
                     if(!Lf) {
-                        ERROR("undefed STRD\r\n");
+                        code_type = code_is_unknow;
+                        //ERROR("undefed STRD\r\n");
                     }
                     break;
                 default:
-                    code_type = code_is_unknow;
-                    ERROR("undefed shift\r\n");
+                    ;
+                    //ERROR("undefed shift\r\n");
                 }
                 break;
             default:
-                code_type = code_is_unknow;
-                ERROR("undefed Bit7\r\n");
+                ;
+                //ERROR("undefed Bit7\r\n");
             }
             break;
         default:
-            code_type = code_is_unknow;
-            ERROR("undefed Bit4\r\n");
+            ;
+            //ERROR("undefed Bit4\r\n");
         }
         break;
     case 1:
@@ -874,8 +891,7 @@ void decode(struct armv4_cpu_t *cpu)
             }
             
         } else {
-            code_type = code_is_unknow;
-            ERROR("undefined instruction\r\n");
+            //ERROR("undefined instruction\r\n");
         }
         break;
     case 4:
@@ -905,9 +921,7 @@ void decode(struct armv4_cpu_t *cpu)
         break;
     case 6:
         //Coprocessor load/store and double register transfers
-        code_type = code_is_unknow;
-        WARN("Coprocessor todo... \r\n");
-        exception_out(cpu);
+        //ERROR("Coprocessor todo... \r\n");
         break;
     case 7:
         //software interrupt
@@ -920,18 +934,18 @@ void decode(struct armv4_cpu_t *cpu)
                 code_type = code_is_mcr;
                 PRINTF("mcr \r\n");
             } else {
-                WARN("Coprocessor data processing todo... \r\n");
-                exception_out(cpu);
+                //ERROR("Coprocessor data processing todo... \r\n");
             }
         }
         break;
     default:
-        code_type = code_is_unknow;
-        WARN("unsupported code\r\n");
-        exception_out(cpu);
+        ;
+        //ERROR("unsupported code\r\n");
     }
 
     //return cond_satisfy;
+
+
     //----------------------------------------------------------------------------------------------------------
     //----------------------------------------------------------------------------------------------------------
     //execute
@@ -1060,7 +1074,7 @@ void decode(struct armv4_cpu_t *cpu)
         }while(0);
         break;
     case code_is_swi:
-        dec->swi_flag = 1;
+        cpu->decoder.event_id = EVENT_ID_SWI;
         return;
         break;
     case code_is_mrs:
@@ -1115,6 +1129,7 @@ void decode(struct armv4_cpu_t *cpu)
              */
             uint32_t tmp = read_word(cpu, operand1);
             if(mmu_check_status(&cpu->mmu)) {
+                cpu->decoder.event_id = EVENT_ID_DATAABT;
                 return;
             }
             write_word(cpu, operand1, operand2);
@@ -1124,8 +1139,8 @@ void decode(struct armv4_cpu_t *cpu)
         }while(0);
         break;
     default:
-        ERROR("unsupported code_type = %d", code_type);
-        break;
+        cpu->decoder.event_id = EVENT_ID_UNDEF;
+        return;
     }
     
     /******************shift**********************/
@@ -1487,6 +1502,7 @@ void decode(struct armv4_cpu_t *cpu)
                     //LDRT restore cpsr
                     cpsr(cpu) = tmpcpsr;
                 }
+                cpu->decoder.event_id = EVENT_ID_DATAABT;
                 return;
             }
             register_write(cpu, Rd, data);
@@ -1517,6 +1533,7 @@ void decode(struct armv4_cpu_t *cpu)
                     //LDRT restore cpsr
                     cpsr(cpu) = tmpcpsr;
                 }
+                cpu->decoder.event_id = EVENT_ID_DATAABT;
                 return;
             }
             PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd, data, address);
@@ -1553,6 +1570,7 @@ void decode(struct armv4_cpu_t *cpu)
                     }
                     uint32_t data = read_word(cpu, address);
                     if(mmu_check_status(&cpu->mmu)) {
+                        cpu->decoder.event_id = EVENT_ID_DATAABT;
                         return;
                     }
                     if(n == 15) {
@@ -1614,6 +1632,7 @@ void decode(struct armv4_cpu_t *cpu)
                     
                     PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", n, register_read(cpu, n), address);
                     if(mmu_check_status(&cpu->mmu)) {
+                        cpu->decoder.event_id = EVENT_ID_DATAABT;
                         return;
                     }
                     
@@ -1722,6 +1741,9 @@ void fetch(struct armv4_cpu_t *cpu)
     cpu->decoder.instruction_word = read_word(cpu, pc);
     PRINTF("[0x%04x]: ", pc);
     register_write(cpu, 15, pc + 4 ); //current pc add 4
+    if(mmu_check_status(&cpu->mmu)) {
+        cpu->decoder.event_id = EVENT_ID_PREAABT;
+    }
 }
 
 

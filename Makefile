@@ -15,7 +15,7 @@ slip_tun.c
 
 C_INCLUDES =  \
 -I./
-C_FLAGS = -Os -Wall -std=gnu99 
+C_FLAGS = -O3 -Wall -std=gnu99 
 C_DFLAG =  -D_BSD_SOURCE -D_DEFAULT_SOURCE -DTUN_SUPPORT -DFS_MMAP_MODE
 
 

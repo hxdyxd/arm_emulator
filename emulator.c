@@ -254,25 +254,26 @@ int main(int argc, char **argv)
 
     for(;;) {
         cpu->code_counter++;
-        //printf("%d 0x%x\n", cpu->code_counter, register_read(cpu, 15));
+        cpu->decoder.event_id = EVENT_ID_IDLE;
 
         fetch(cpu);
-        if(mmu_check_status(&cpu->mmu)) {
-            //check fetch instruction_word fault
-            interrupt_exception(cpu, INT_EXCEPTION_PREABT);
-            cpu->mmu.mmu_fault = 0;
-            continue;
-        }
+        if(EVENT_ID_IDLE == cpu->decoder.event_id)
+            decode(cpu);
 
-        decode(cpu);
-        if(cpu->decoder.swi_flag) {
-            cpu->decoder.swi_flag = 0;
+        switch(cpu->decoder.event_id) {
+        case EVENT_ID_UNDEF:
+            interrupt_exception(cpu, INT_EXCEPTION_UNDEF);
+            break;
+        case EVENT_ID_SWI:
             interrupt_exception(cpu, INT_EXCEPTION_SWI);
-        } else if(mmu_check_status(&cpu->mmu)) {
-            //check memory data fault
+            break;
+        case EVENT_ID_DATAABT:
             interrupt_exception(cpu, INT_EXCEPTION_DATAABT);
-            cpu->mmu.mmu_fault = 0;
-        } else {
+            break;
+        case EVENT_ID_PREAABT:
+            interrupt_exception(cpu, INT_EXCEPTION_PREABT);
+            break;
+        default:
             if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 65536)) {
                 interrupt_exception(cpu, INT_EXCEPTION_IRQ);
             }

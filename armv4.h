@@ -81,7 +81,12 @@ struct armv4_cpu_t {
 
     struct decoder_t {
         uint32_t instruction_word;
-        uint8_t swi_flag;
+        uint8_t event_id;
+#define EVENT_ID_IDLE      (0)
+#define EVENT_ID_UNDEF     (1)
+#define EVENT_ID_SWI       (2)
+#define EVENT_ID_DATAABT   (3)
+#define EVENT_ID_PREAABT   (4)
     }decoder;
 
     struct mmu_t {
@@ -127,11 +132,6 @@ void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link
 uint32_t register_read(struct armv4_cpu_t *cpu, uint8_t id);
 void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val);
 
-
-/*
- *  return 1, mmu exception
- */
-#define mmu_check_status(mmu)   (mmu)->mmu_fault
 
 uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint8_t mmu, uint8_t mask);
 void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint32_t data,  uint8_t mask);
