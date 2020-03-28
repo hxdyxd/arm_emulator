@@ -34,8 +34,6 @@
 #define MAX_FS_SIZE   (0x2000000)   //32M
 
 
-//cpu memory
-struct armv4_cpu_t cpu_handle;
 
 //peripheral register
 struct peripheral_t peripheral_reg_base = {
@@ -173,6 +171,7 @@ void usage(const char *file)
 
 int main(int argc, char **argv)
 {
+    struct armv4_cpu_t cpu_handle;
     struct armv4_cpu_t *cpu = &cpu_handle;
     //default value
     uint8_t mode = USE_BINARY;

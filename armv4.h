@@ -34,6 +34,8 @@ extern uint8_t global_debug_flag;
 #define ERROR(...)  do{ if(1){printf(__VA_ARGS__);printf("Press any key to exit...\n");getchar();exit(-1);} }while(0)
 
 #define  IS_SET(v, bit) ( ((v)>>(bit))&1 )
+#define  SWAP_VAL(a,b) do{uint32_t tmp = a;a = b;b = tmp;}while(0)
+
 
 struct armv4_cpu_t {
     uint32_t spsr[7];
@@ -80,6 +82,31 @@ struct armv4_cpu_t {
 #define   CPU_MODE_Mon       6
 
     struct decoder_t {
+        uint8_t code_type;
+#define  code_type_swi      1
+#define  code_type_b        2
+#define  code_type_ldm      3
+#define  code_type_ldr1     4
+#define  code_type_ldr0     5
+#define  code_type_dp2      6
+#define  code_type_msr1     7
+#define  code_type_ldrsh1   8
+#define  code_type_ldrsh0   9
+#define  code_type_ldrsb1  10
+#define  code_type_ldrsb0  11
+#define  code_type_ldrh1   12
+#define  code_type_ldrh0   13
+#define  code_type_swp     14
+#define  code_type_multl   15
+#define  code_type_mult    16
+#define  code_type_dp1     17
+#define  code_type_bx      18
+#define  code_type_dp0     19
+#define  code_type_msr0    20
+#define  code_type_mrs     21
+#define  code_type_mcr     22
+#define  code_type_unknow  255
+
         uint32_t instruction_word;
         uint8_t event_id;
 #define EVENT_ID_IDLE      (0)

@@ -146,6 +146,20 @@ void pi_test(void)
     puts("\r\n");
 }
 
+void shifter_test(void)
+{
+    uint32_t a = 0xffffffff;
+    uint32_t b;
+    uint8_t rot_num = 0;
+
+    for(int rot_num=0; rot_num<50; rot_num++) {
+        b = a << rot_num;
+        printf("<<%d %08x, ", rot_num, b);
+        b = a >> rot_num;
+        printf(">>%d %08x\n", rot_num, b);
+    }
+}
+
 
 uint16_t bss_test_val[10];
 
@@ -162,6 +176,7 @@ int main(void)
     float_test();
     sin_test();
     pi_test();
+    shifter_test();
 
     INT_PND = 0;
     INT_MSK &= ~(3<<0); //enable timer interrupt

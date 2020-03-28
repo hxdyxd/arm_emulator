@@ -18,6 +18,10 @@
  */
 #include <armv4.h>
 
+#define  BSET(b)  (1<<(b))
+#define  BMASK(v,m,r)  (((v)&(m)) == (r))
+
+
 const char *string_register_mode[7] = {
     "USER",
     "FIQ",
@@ -160,12 +164,6 @@ static void exception_out(struct armv4_cpu_t *cpu)
 #define   cp15_far(mmu)            (mmu)->reg[6]
 
 
-
-#define   cp15_read(mmu,r)      (mmu)->reg[r]
-#define   cp15_write(mmu,r,d)   (mmu)->reg[r] = d
-#define   cp15_reset(mmu)      memset((mmu)->reg, 0, sizeof((mmu)->reg))
-
-
 //mmu enable
 #define  cp15_ctl_m(mmu)  IS_SET(cp15_ctl(mmu), 0)
 //Alignment fault checking
@@ -176,6 +174,28 @@ static void exception_out(struct armv4_cpu_t *cpu)
 #define  cp15_ctl_r(mmu)  IS_SET(cp15_ctl(mmu), 9)
 //high vectors
 #define  cp15_ctl_v(mmu)  IS_SET(cp15_ctl(mmu), 13)
+
+
+uint32_t cp15_read(struct mmu_t *mmu, uint8_t op2, uint8_t CRn)
+{
+    if(!CRn && op2) {
+        //Cache Type register
+        return 0;
+    }
+    return mmu->reg[CRn];
+}
+
+void cp15_write(struct mmu_t *mmu, uint8_t op2, uint8_t CRn, uint32_t val)
+{
+    mmu->reg[CRn] = val;
+}
+
+void cp15_reset(struct mmu_t *mmu)
+{
+    memset(mmu->reg, 0, sizeof(mmu->reg));
+    mmu->reg[0] = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5; //Main ID register
+}
+
 
 /*
  *  return 1, mmu fault
@@ -411,7 +431,7 @@ uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
     
     //1M Peripheral memory
     for(int i=0; i<cpu->peripheral.number; i++) {
-        if(cpu->peripheral.link[i].read && (address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
+        if(cpu->peripheral.link[i].read && BMASK(address, cpu->peripheral.link[i].mask, cpu->peripheral.link[i].prefix)) {
             uint32_t offset = address - cpu->peripheral.link[i].prefix;
             return cpu->peripheral.link[i].read(cpu->peripheral.link[i].reg_base, offset);
         }
@@ -447,7 +467,7 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
     
     //4G Peripheral memory
     for(int i=0; i<cpu->peripheral.number; i++) {
-        if(cpu->peripheral.link[i].write && (address&cpu->peripheral.link[i].mask) == cpu->peripheral.link[i].prefix) {
+        if(cpu->peripheral.link[i].write && BMASK(address, cpu->peripheral.link[i].mask, cpu->peripheral.link[i].prefix)) {
             uint32_t offset = address - cpu->peripheral.link[i].prefix;
             cpu->peripheral.link[i].write(cpu->peripheral.link[i].reg_base, offset, data, mask);
             return;
@@ -546,38 +566,856 @@ void interrupt_exception(struct armv4_cpu_t *cpu, uint8_t type)
 }
 
 
-#define  code_is_swi      1
-#define  code_is_b        2
-#define  code_is_ldm      3
-#define  code_is_ldr1     4
-#define  code_is_ldr0     5
-#define  code_is_dp2      6
-#define  code_is_msr1     7
-#define  code_is_ldrsh1   8
-#define  code_is_ldrsh0   9
-#define  code_is_ldrsb1  10
-#define  code_is_ldrsb0  11
-#define  code_is_ldrh1   12
-#define  code_is_ldrh0   13
-#define  code_is_swp     14
-#define  code_is_multl   15
-#define  code_is_mult    16
-#define  code_is_dp1     17
-#define  code_is_bx      18
-#define  code_is_dp0     19
-#define  code_is_msr0    20
-#define  code_is_mrs     21
-#define  code_is_mcr     22
-#define  code_is_unknow  255
+void cpu_init(struct armv4_cpu_t *cpu)
+{
+    memset(cpu, 0, sizeof(struct armv4_cpu_t));
+    cpsr(cpu) = CPSR_M_SVC;
+    cpsr_i_set(cpu, 1);  //disable irq
+    cpsr_f_set(cpu, 1);  //disable fiq
+    cp15_reset(&cpu->mmu);
+}
+
+
+void fetch(struct armv4_cpu_t *cpu)
+{
+    uint32_t pc = register_read(cpu, 15) - 4; //current pc
+    
+    cpu->decoder.instruction_word = read_word(cpu, pc);
+    PRINTF("[0x%04x]: ", pc);
+    register_write(cpu, 15, pc + 4 ); //current pc add 4
+    if(mmu_check_status(&cpu->mmu)) {
+        cpu->decoder.event_id = EVENT_ID_PREAABT;
+    }
+}
+
+
+/*
+ * exception_out
+ * author:hxdyxd
+ */
+void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link, int number)
+{
+    cpu->peripheral.link = link;
+    cpu->peripheral.number = number;
+    for(int i=0; i<cpu->peripheral.number; i++) {
+        if(cpu->peripheral.link[i].reset) {
+            if(cpu->peripheral.link[i].reset(cpu->peripheral.link[i].reg_base)) {
+                WARN("[%d]%s register at 0x%08x, size %d\n",
+                    i, cpu->peripheral.link[i].name, cpu->peripheral.link[i].prefix, (~cpu->peripheral.link[i].mask)+1);
+            } else {
+                cpu->peripheral.link[i].reset = NULL;
+                cpu->peripheral.link[i].read = NULL;
+                cpu->peripheral.link[i].write = NULL;
+            }
+        }
+    }
+}
+
+
+#define SHIFTS_MODE_IMMEDIATE         (1)
+#define SHIFTS_MODE_REGISTER          (2)
+#define SHIFTS_MODE_32BIT_IMMEDIATE   (3)
+
+static uint8_t shifter(struct armv4_cpu_t *cpu, uint32_t *op, const uint8_t rot_num,
+ const uint8_t shift, const uint8_t shifts_mode)
+{
+    uint8_t shifter_carry_out = 0;
+    uint32_t operand2 = *op;
+    switch(shift) {
+    case 0:
+        //LSL
+        //5.1.4, 5.1.5, 5.1.6
+        if(rot_num == 0) {
+            shifter_carry_out = cpsr_c(cpu);
+        } else if(rot_num < 32) {
+            shifter_carry_out = IS_SET(operand2, 32 - rot_num);
+            operand2 = operand2 << rot_num;
+        } else if(rot_num == 32) {
+            shifter_carry_out = operand2&1;
+            operand2 = 0;
+        } else /* operand2 > 32 */ {
+            shifter_carry_out = 0;
+            operand2 = 0;
+        }
+
+        break;
+    case 1:
+        //LSR
+        switch(shifts_mode) {
+        case SHIFTS_MODE_IMMEDIATE:
+            //PD(is) On, 5.1.7
+            if(rot_num == 0) {
+                shifter_carry_out = IS_SET(operand2, 31);
+                operand2 = 0;
+            } else {
+                shifter_carry_out = IS_SET(operand2, rot_num-1);
+                operand2 = operand2 >> rot_num;
+            }
+            break;
+        case SHIFTS_MODE_REGISTER:
+            //DP(rs) On, 5.1.8
+            if(rot_num == 0) {
+                shifter_carry_out = cpsr_c(cpu);
+            } else if(rot_num < 32) {
+                shifter_carry_out = IS_SET(operand2, rot_num-1);
+                operand2 = operand2 >> rot_num;
+            } else if(rot_num == 32) {
+                //If n is 32 or more, then all the bits in the result are cleared to 0.
+                shifter_carry_out = IS_SET(operand2, 31);
+                operand2 = 0;
+            } else /* operand2 > 32 */ {
+                shifter_carry_out = 0;
+                operand2 = 0;
+            }
+            break;
+        }
+
+        break;
+    case 2:
+        //ASR
+        switch(shifts_mode) {
+        case SHIFTS_MODE_IMMEDIATE:
+            //PD(is) On, 5.1.9
+            if(rot_num == 0) {
+                shifter_carry_out = IS_SET(operand2, 31);
+                if(!IS_SET(operand2, 31)) {
+                    operand2 = 0;
+                } else {
+                    operand2 = 0xffffffff;
+                }
+            } else {
+                shifter_carry_out = IS_SET(operand2, rot_num-1);
+                operand2 = (int32_t)operand2 >> rot_num;
+            }
+            break;
+        case SHIFTS_MODE_REGISTER:
+            //DP(rs) On, 5.1.10
+            if(rot_num == 0) {
+                shifter_carry_out = cpsr_c(cpu);
+            } else if(rot_num < 32) {
+                shifter_carry_out = IS_SET(operand2, rot_num-1);
+                operand2 = (int32_t)operand2 >> rot_num;
+            } else /* operand2 >= 32 */ {
+                if(!IS_SET(operand2, 31)) {
+                    shifter_carry_out = IS_SET(operand2, 31);
+                    operand2 = 0;
+                } else {
+                    shifter_carry_out = IS_SET(operand2, 31);
+                    operand2 = 0xffffffff;
+                }
+            }
+            break;
+        }
+        
+        break;
+    case 3:
+        //ROR, RRX
+        switch(shifts_mode) {
+        case SHIFTS_MODE_32BIT_IMMEDIATE:
+            //DP(i), 5.1.3
+            operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
+            if(rot_num == 0) {
+                shifter_carry_out = cpsr_c(cpu);
+            } else {
+                shifter_carry_out = IS_SET(operand2, 31);
+            }
+            break;
+        case SHIFTS_MODE_IMMEDIATE:
+            //PD(is) ROR On
+            if(rot_num == 0) {
+                //RRX, 5.1.13
+                shifter_carry_out = operand2&1;
+                operand2 = (cpsr_c(cpu) << 31) | (operand2 >> 1);
+            } else {
+                //ROR, 5.1.11
+                shifter_carry_out = IS_SET(operand2, rot_num-1);
+                operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
+            }
+            break;
+        case SHIFTS_MODE_REGISTER:
+            //DP(rs) ROR On
+            //ROR, 5.1.12
+            if(rot_num == 0) {
+                shifter_carry_out = cpsr_c(cpu);
+            } else if((rot_num&0x1f) == 0) {
+                shifter_carry_out = IS_SET(operand2, 31);
+            } else /* rot_num > 0 */ {
+                uint8_t rot_num_5bit = rot_num & 0x1f; //5bit
+                shifter_carry_out = IS_SET(operand2, rot_num_5bit-1);
+                operand2 = (operand2 << (32 - rot_num_5bit) | operand2 >> rot_num_5bit);
+            }
+            break;
+        }
+        
+        break;
+    }
+    *op = operand2;
+    return shifter_carry_out;
+}
+
+
+
+#define ALU_MODE_ADD     (1)
+#define ALU_MODE_SUB     (2)
+
+static uint32_t adder(const uint32_t op1, const uint32_t op2, const uint32_t carry,
+ const uint8_t add_mode, uint8_t *bit_cy, uint8_t *bit_ov)
+{
+    uint32_t sum_middle = 0, cy_high_bits = 0;
+    uint32_t aluout = 0;
+    if(add_mode == ALU_MODE_ADD) {
+        sum_middle = (op1&0x7fffffff) + (op2&0x7fffffff) + carry;
+        cy_high_bits =  IS_SET(op1, 31) + IS_SET(op2, 31) + IS_SET(sum_middle, 31);
+
+        aluout = (cy_high_bits << 31) | (sum_middle&0x7fffffff);
+        *bit_cy = (cy_high_bits >> 1)&1;
+        *bit_ov = (*bit_cy ^ IS_SET(sum_middle, 31))&1;
+    } else if(add_mode == ALU_MODE_SUB) {
+        sum_middle = (op1&0x7fffffff) - (op2&0x7fffffff) - carry;
+        cy_high_bits =  IS_SET(op1, 31) - IS_SET(op2, 31) - IS_SET(sum_middle, 31);
+
+        aluout = (cy_high_bits << 31) | (sum_middle&0x7fffffff);
+        *bit_cy = (cy_high_bits >> 1)&1;
+        *bit_ov = (*bit_cy ^ IS_SET(sum_middle, 31))&1;
+        *bit_cy = !(*bit_cy);
+    }
+    
+    PRINTF("[ALU]op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", op1, op2, carry, aluout);
+    return aluout;
+}
+
+
+//**************************************************
+//******************decode**************************
+//**************************************************
+
+struct ins_dp_immediate_shift {
+    uint32_t Rm:4;
+    uint32_t bit4:1; //0
+    uint32_t shift:2;
+    uint32_t shift_amount:5;
+    uint32_t Rd:4;
+    uint32_t Rn:4;
+    uint32_t S:1;
+    uint32_t opcode:4;
+    uint32_t f:3; //0
+    uint32_t cond:4;
+};
+
+struct ins_dp_register_shift {
+    uint32_t Rm:4;
+    uint32_t bit4:1; //1
+    uint32_t shift:2;
+    uint32_t bit7:1; //0
+    uint32_t Rs:4;
+    uint32_t Rd:4;
+    uint32_t Rn:4;
+    uint32_t S:1;
+    uint32_t opcode:4;
+    uint32_t f:3; //0
+    uint32_t cond:4;
+};
+
+struct ins_dp_immediate {
+    uint32_t immediate:8;
+    uint32_t rotate:4;
+    uint32_t Rd:4;
+    uint32_t Rn:4;
+    uint32_t S:1;
+    uint32_t opcode:4;
+    uint32_t f:3; //1
+    uint32_t cond:4;
+};
+
+struct ins_ldr_immediate_offset {
+    uint32_t immediate:12;
+    uint32_t Rd:4;
+    uint32_t Rn:4;
+    uint32_t L:1;
+    uint32_t W:1;
+    uint32_t B:1;
+    uint32_t U:1;
+    uint32_t P:1;
+    uint32_t f:3; //2
+    uint32_t cond:4;
+};
+
+struct ins_ldr_register_offset {
+    uint32_t Rm:4;
+    uint32_t bit4:1;
+    uint32_t shift:2;
+    uint32_t shift_amount:5;
+    uint32_t Rd:4;
+    uint32_t Rn:4;
+    uint32_t L:1;
+    uint32_t W:1;
+    uint32_t B:1;
+    uint32_t U:1;
+    uint32_t P:1;
+    uint32_t f:3; //3
+    uint32_t cond:4;
+};
+
+struct ins_ldm {
+    uint32_t list:16;
+    uint32_t Rn:4;
+    uint32_t L:1;
+    uint32_t W:1;
+    uint32_t S:1;
+    uint32_t U:1;
+    uint32_t P:1;
+    uint32_t f:3; //4
+    uint32_t cond:4;
+};
+
+struct ins_b {
+    uint32_t offset22_0:23;
+    uint32_t offset23:1;
+    uint32_t L:1;
+    uint32_t f:3; //5
+    uint32_t cond:4;
+};
+
+struct ins_swi {
+    uint32_t number:24;
+    uint32_t bit24:1;
+    uint32_t f:3; //5
+    uint32_t cond:4;
+};
+
+struct ins_mcr {
+    uint32_t CRm:4;
+    uint32_t bit4:1; //1
+    uint32_t opcode2:3;
+    uint32_t cp_num:4;
+    uint32_t Rd:4;
+    uint32_t CRn:4;
+    uint32_t bit20:1; //0
+    uint32_t opcode1:4;
+    uint32_t f:3; //7
+    uint32_t cond:4;
+};
+
+struct ins_bit {
+    uint32_t bit3_0:4;
+    uint32_t bit4:1;
+    uint32_t bit5:1;
+    uint32_t bit6:1;
+    uint32_t bit7:1;
+    uint32_t bit19_8:12;
+    uint32_t bit20:1;
+    uint32_t bit21:1;
+    uint32_t bit22:1;
+    uint32_t bit24_23:2;
+    uint32_t bit31_25:7;
+};
+
+
+union ins_t {
+    uint32_t word;
+    struct ins_dp_immediate_shift    dp_is;
+    struct ins_dp_register_shift     dp_rs;
+    struct ins_dp_immediate          dp_i;
+    struct ins_ldr_immediate_offset  ldr_i;
+    struct ins_ldr_register_offset   ldr_r;
+    struct ins_ldm                   ldm;
+    struct ins_b                     b;
+    struct ins_swi                   swi;
+    struct ins_mcr                   mcr;
+    struct ins_bit                   _bit;
+};
+
+#define opcode        (ins.dp_is.opcode)
+#define Bit4          (ins._bit.bit4)
+#define Bit5          (ins._bit.bit5)
+#define Bit6          (ins._bit.bit6)
+#define Bit7          (ins._bit.bit7)
+#define Bit20         (ins._bit.bit20)
+#define Bit21         (ins._bit.bit21)
+#define Bit22         (ins._bit.bit22)
+#define Bit24_23      (ins._bit.bit24_23)
+#define Rm            (ins.dp_rs.Rm)
+#define Rn            (ins.dp_rs.Rn)
+#define Rd            (ins.dp_rs.Rd)
+#define Rs            (ins.dp_rs.Rs)
+#define shift_amount  (ins.dp_is.shift_amount)
+#define shift         (ins.dp_is.shift)
+#define rotate_imm    (ins.dp_i.rotate)
+#define Pf            (ins.ldr_r.P) //ldr,ldm
+#define Uf            (ins.ldr_r.U) //ldr,ldm
+#define Bf            (ins.ldr_r.B) //ldr,swp
+#define Wf            (ins.ldr_r.W) //ldr,ldm
+#define Lf            (ins.ldr_r.L) //ldr,ldm
+#define Lf_b          (ins.b.L) //b
+#define Lf_bx         (Bit5)  //bx
+
+#define immediate_i       (ins.dp_i.immediate)
+#define immediate_ldr     (ins.ldr_i.immediate)
+#define immediate_extldr  ((Rs << 4) | Rm)
+#define immediate_b       (((ins.b.offset23)?(ins.b.offset22_0|0xFF800000):(ins.b.offset22_0))<<2)
+
+
+static inline uint8_t code_decoder(const union ins_t ins)
+{
+    uint8_t code_type = code_type_unknow;
+    switch(ins.dp_is.f) {
+    case 0:
+        switch(Bit4) {
+        case 0:
+            if( (Bit24_23 == 2 ) && !Bit20 ) {
+                //Miscellaneous instructions
+                if(Bit21 && !Bit7) {
+                    code_type = code_type_msr0;
+                } else if(!Bit21 && !Bit7) {
+                    code_type = code_type_mrs;
+                } else {
+                    //ERROR("undefined bit7 error \r\n");
+                }
+            } else {
+                //Data processing register shift by immediate
+                code_type = code_type_dp0;
+            }
+            break;
+        case 1:
+            switch(Bit7) {
+            case 0:
+                if( (Bit24_23 == 2 ) && !Bit20 ) {
+                    //Miscellaneous instructions
+                    if(!Bit22 && Bit21 && !Bit6 ) {
+                        //Branch/exchange
+                        code_type = code_type_bx;
+                    } else if(Bit6 && !Bit5 ) {
+                        //Enhanced DSP add/subtracts
+                        //ERROR("Enhanced DSP add/subtracts R%d\r\n", Rm);
+                    } else if(Bit6 && Bit5) {
+                        //Software breakpoint
+                        //ERROR("Software breakpoint \r\n");
+                    } else if(!Bit6 && !Bit5 && opcode == 0xb) {
+                        //Count leading zero
+                        //ERROR("Count leading zero \r\n");
+                    } else {
+                        //ERROR("Undefed Miscellaneous instructions\r\n");
+                    }
+                } else {
+                    //Data processing register shift by register
+                    code_type = code_type_dp1;
+                }
+                break;
+            case 1:
+                //Multiplies, extra load/storesss
+                switch(shift) {
+                case 0:
+                    if(Bit24_23 == 0) {
+                        code_type = code_type_mult;
+                    } else if(Bit24_23 == 1) {
+                        code_type = code_type_multl;
+                    } else if(Bit24_23 == 2 && !Bit20 && !Bit21) {
+                        code_type = code_type_swp;
+                    }
+                    break;
+                case 1:
+                    //code_type_ldrh
+                    if(Bit22) {
+                        code_type = code_type_ldrh1;
+                    } else {
+                        code_type = code_type_ldrh0;
+                    }
+                    break;
+                case 2:
+                    //code_type_ldrsb
+                    if(Bit22) {
+                        code_type = code_type_ldrsb1;
+                    } else {
+                        code_type = code_type_ldrsb0;
+                    }
+                    if(!Lf) {
+                        code_type = code_type_unknow;
+                        //ERROR("undefed LDRD\r\n");
+                    }
+                    break;
+                case 3:
+                    //code_type_ldrsh
+                    if(Bit22) {
+                        code_type = code_type_ldrsh1;
+                    } else {
+                        code_type = code_type_ldrsh0;
+                    }
+                    if(!Lf) {
+                        code_type = code_type_unknow;
+                        //ERROR("undefed STRD\r\n");
+                    }
+                    break;
+                default:
+                    ;
+                    //ERROR("undefed shift\r\n");
+                }
+                break;
+            default:
+                ;
+                //ERROR("undefed Bit7\r\n");
+            }
+            break;
+        default:
+            ;
+            //ERROR("undefed Bit4\r\n");
+        }
+        break;
+    case 1:
+        //Data processing immediate and move immediate to status register
+        if( (opcode == 0x9 || opcode == 0xb ) && !Bit20 ) {
+            code_type = code_type_msr1;
+        } else if( (opcode == 0x8 || opcode == 0xa ) && !Bit20 ) {
+            //PRINTF("undefined instruction\r\n");
+        } else {
+            //Data processing immediate
+            code_type = code_type_dp2;
+        }
+        break;
+    case 2:
+        //load/store immediate offset
+        code_type = code_type_ldr0;
+        break;
+    case 3:
+        //load/store register offset
+        if(!ins.ldr_r.bit4) {
+            code_type = code_type_ldr1;
+        } else {
+            //ERROR("undefined instruction\r\n");
+        }
+        break;
+    case 4:
+        //load/store multiple
+        code_type = code_type_ldm;
+        break;
+    case 5:
+        //branch
+        code_type = code_type_b;
+        break;
+    case 6:
+        //Coprocessor load/store and double register transfers
+        //ERROR("Coprocessor todo... \r\n");
+        break;
+    case 7:
+        //software interrupt
+        if(ins.swi.bit24) {
+            code_type = code_type_swi;
+        } else {
+            if(Bit4) {
+                //Coprocessor move to register
+                code_type = code_type_mcr;
+            } else {
+                //ERROR("Coprocessor data processing todo... \r\n");
+            }
+        }
+        break;
+    }
+    return code_type;
+}
+
+
+static void code_debug(const union ins_t ins, const uint8_t code_type)
+{
+    switch(code_type) {
+    case code_type_msr0:
+        PRINTF("msr0 %sPSR_%d  R%d\r\n", Bit22?"S":"C", Rn, Rm);
+        break;
+    case code_type_mrs:
+        PRINTF("mrs R%d %s\r\n", Rd, Bit22?"SPSR":"CPSR");
+        break;
+    case code_type_dp0:
+        PRINTF("dp0 %s dst register R%d, first operand R%d, Second operand R%d %s immediate #0x%x\r\n",
+             opcode_table[opcode], Rd, Rn, Rm, shift_table[shift], shift_amount);
+        break;
+    case code_type_bx:
+        PRINTF("bx B%sX R%d\r\n", Lf_bx?"L":"", Rm);
+        break;
+    case code_type_dp1:
+        PRINTF("dp1 %s dst register R%d, first operand R%d, Second operand R%d %s R%d\r\n",
+                 opcode_table[opcode], Rd, Rn, Rm, shift_table[shift], Rs);
+        break;
+    case code_type_mult:
+        if( IS_SET(ins.word, 21) ) {
+            PRINTF("mult MUA%s R%d <= R%d * R%d + R%d\r\n", Bit20?"S":"", Rn, Rm, Rs, Rd);
+        } else {
+            PRINTF("mult MUL%s R%d <= R%d * R%d\r\n", Bit20?"S":"", Rn, Rm, Rs);
+        }
+        break;
+    case code_type_multl:
+        PRINTF("multl %sM%s [R%d L, R%d H] %s= R%d * R%d\r\n", Bit22?"S":"U",
+            IS_SET(ins.word, 21)?"LAL":"ULL", Rd, Rn, Bit21?"+":"", Rm, Rs);
+        break;
+    case code_type_swp:
+        PRINTF("swp SWP%s\r\n", Bf?"B":"");
+        break;
+    case code_type_ldrh1:
+        if(Pf) {
+            PRINTF("ldrh1 %sH R%d, [R%d, immediate %s#%d] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
+        } else {
+            PRINTF("ldrh1 %sH R%d, [R%d], immediate %s#%d %s\r\n",
+            Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
+        }
+        break;
+    case code_type_ldrh0:
+        if(Pf) {
+            PRINTF("ldrh0 %sH R%d, [R%d, %s[R%d] ] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+        } else {
+            PRINTF("ldrh0 %sH R%d, [R%d], %s[R%d] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+        }
+        break;
+    case code_type_ldrsb1:
+        if(Pf) {
+            PRINTF("ldrsb1 %sSB R%d, [R%d, immediate %s#%d] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
+        } else {
+            PRINTF("ldrsb1 %sSB R%d, [R%d], immediate %s#%d %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
+        }
+        break;
+    case code_type_ldrsb0:
+        if(Pf) {
+            PRINTF("ldrsb0 %sSB R%d, [R%d, %s[R%d] ] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+        } else {
+            PRINTF("ldrsb0 %sSB R%d, [R%d], %s[R%d] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+        }
+        break;
+    case code_type_ldrsh1:
+        if(Pf) {
+            PRINTF("ldrsh1 %sSH R%d, [R%d, immediate %s#%d] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
+        } else {
+            PRINTF("ldrsh1 %sSH R%d, [R%d], immediate %s#%d %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
+        }
+        break;
+    case code_type_ldrsh0:
+        if(Pf) {
+            PRINTF("ldrsh0 %sSH R%d, [R%d, %s[R%d] ] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+        } else {
+            PRINTF("ldrsh0 %sSH R%d, [R%d], %s[R%d] %s\r\n",
+             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
+        }
+        break;
+    case code_type_msr1:
+        PRINTF("msr1 MSR %sPSR_%d  immediate [#%d ROR %d]\r\n", Bit22?"S":"C", Rn, immediate_i, rotate_imm*2);
+        break;
+    case code_type_dp2:
+        PRINTF("dp2 %s dst register R%d, first operand R%d, Second operand immediate [#%d ROR %d]\r\n",
+         opcode_table[opcode], Rd, Rn, immediate_i, rotate_imm*2);
+        break;
+    case code_type_ldr0:
+        if(Pf) {
+            PRINTF("ldr0 %s%s dst register R%d, [base address at R%d, Second address immediate #%s0x%x] %s\r\n",
+             Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-", immediate_ldr, Wf?"!":"");
+        } else {
+            PRINTF("ldr0 %s%s dst register R%d, [base address at R%d], Second address immediate #%s0x%x\r\n",
+             Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-", immediate_ldr);
+        }
+        break;
+    case code_type_ldr1:
+        if(Pf) {
+            PRINTF("ldr1 %s%s dst register R%d, [base address at R%d, offset address at %s[R%d %s %d]] %s\r\n",
+             Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, shift_table[shift], shift_amount, Wf?"!":"");
+        } else {
+            PRINTF("ldr1 %s%s dst register R%d, [base address at R%d], offset address at %s[R%d %s %d] \r\n",
+             Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, shift_table[shift], shift_amount);
+        }
+        break;
+    case code_type_ldm:
+        PRINTF("ldm %s%s%s R%d%s \r\n", Lf?"LDM":"STM", Uf?"I":"D", Pf?"B":"A",  Rn, Wf?"!":"");
+        break;
+    case code_type_b:
+        PRINTF("B%s PC +  0x%08x\r\n", Lf_b?"L":"", immediate_b);
+        break;
+    case code_type_swi:
+        PRINTF("swi \r\n");
+    case code_type_mcr:
+        PRINTF("mcr \r\n");
+        break;
+    }
+}
+
+
+static inline uint32_t code_shifter(struct armv4_cpu_t *cpu, const union ins_t ins, uint8_t code_type, uint8_t *carry)
+{
+    uint32_t operand2 = register_read(cpu, Rm); //3_0;
+    uint32_t rot_num;
+    uint8_t shifter_carry_out = 0;
+    
+    switch(code_type) {
+    case code_type_msr1:
+    case code_type_dp2:
+        //immediate
+        operand2 = immediate_i; //8bit
+        rot_num = rotate_imm<<1;
+        shifter_carry_out = shifter(cpu, &operand2, rot_num, 3, SHIFTS_MODE_32BIT_IMMEDIATE); //use ROR Only
+        break;
+    case code_type_dp1:
+        //register shift
+        rot_num = register_read(cpu, Rs); //32bit
+        shifter_carry_out = shifter(cpu, &operand2, rot_num, shift, SHIFTS_MODE_REGISTER);
+        break;
+    case code_type_dp0:
+    case code_type_ldr1:
+        //immediate shift
+        rot_num = shift_amount; //5bit
+        shifter_carry_out = shifter(cpu, &operand2, rot_num, shift, SHIFTS_MODE_IMMEDIATE);
+        break;
+
+    case code_type_ldr0:
+        operand2 = immediate_ldr; //12bit
+        break;
+    case code_type_ldrh1:
+    case code_type_ldrsb1:
+    case code_type_ldrsh1:
+        operand2 = immediate_extldr; //8bit
+        break;
+    case code_type_ldrh0:
+    case code_type_ldrsb0:
+    case code_type_ldrsh0:
+    case code_type_bx:
+    case code_type_msr0:
+    case code_type_multl:
+        break;
+    case code_type_mrs:
+    case code_type_ldm:
+    case code_type_swp:
+    case code_type_mcr:
+        break;
+    case code_type_b:
+        operand2 = immediate_b;
+        break;
+    case code_type_mult:
+        operand2 *= register_read(cpu, Rs);
+        break;
+
+    case code_type_swi:
+        cpu->decoder.event_id = EVENT_ID_SWI;
+        break;
+    default:
+        cpu->decoder.event_id = EVENT_ID_UNDEF;
+    }
+    *carry = shifter_carry_out;
+    return operand2;
+}
+
+
+static inline uint32_t code_alu(struct armv4_cpu_t *cpu, const union ins_t ins, uint8_t code_type,
+ uint32_t operand1, uint32_t operand2, uint8_t *carry_out, uint8_t *bit_ov)
+{
+    uint8_t carry_in = 0;
+    uint32_t aluout = 0;
+
+    switch(code_type) {
+    case code_type_dp0:
+    case code_type_dp1:
+    case code_type_dp2:
+        switch(opcode) {
+        case 5:
+            //ADC
+            carry_in = cpsr_c(cpu);
+        case 4:
+        case 11:
+            //ADD, CMN
+            aluout = adder(operand1, operand2, carry_in, ALU_MODE_ADD, carry_out, bit_ov);
+            break;
+
+        case 3:
+            //RSB
+            SWAP_VAL(operand1, operand2);
+            aluout = adder(operand1, operand2, carry_in, ALU_MODE_SUB, carry_out, bit_ov);
+            break;
+        case 7:
+            //RSC
+            SWAP_VAL(operand1, operand2);
+        case 6:
+            //SBC
+            carry_in = !cpsr_c(cpu);
+        case 2:
+        case 10:
+            //SUB, CMP
+            aluout = adder(operand1, operand2, carry_in, ALU_MODE_SUB, carry_out, bit_ov);
+            break;
+
+        case 0:
+        case 8:
+            //AND, TST
+            aluout = operand1 & operand2;
+            break;
+        case 1:
+        case 9:
+            //EOR, TEQ
+            aluout = operand1 ^ operand2;
+            break;
+        case 12:
+            //ORR
+            aluout = operand1 | operand2;
+            break;
+        case 13:
+            //MOV
+            aluout = operand2;
+            break;
+        case 14:
+            //BIC
+            aluout = operand1 & (~operand2);
+            break;
+        case 15:
+            //MVN
+            aluout = ~operand2;
+            break;
+        }
+        break;
+    case code_type_ldr0:
+    case code_type_ldr1:
+    case code_type_ldrsb1:
+    case code_type_ldrsh1:
+    case code_type_ldrh1:
+    case code_type_ldrsb0:
+    case code_type_ldrsh0:
+    case code_type_ldrh0:
+        aluout = adder(operand1, operand2, carry_in, Uf?ALU_MODE_ADD:ALU_MODE_SUB, carry_out, bit_ov);
+        break;
+    case code_type_b:
+        operand1 = register_read(cpu, 15);
+        aluout = adder(operand1, operand2, carry_in, ALU_MODE_ADD, carry_out, bit_ov);
+        break;
+    case code_type_mult:
+        //Rd and Rn swap, !!!
+        operand1 = opcode?register_read(cpu, Rd):0; //MLA
+        aluout = adder(operand1, operand2, carry_in, ALU_MODE_ADD, carry_out, bit_ov);
+        break;
+
+    case code_type_bx:
+    case code_type_msr0:
+    case code_type_msr1:
+        aluout = operand2;
+        break;
+    case code_type_ldm:
+    case code_type_mrs:
+    case code_type_swp:
+    case code_type_swi:
+    case code_type_mcr:
+    case code_type_multl:
+        break;
+    }
+    return aluout;
+}
 
 
 void decode(struct armv4_cpu_t *cpu)
 {
     struct decoder_t *dec = &cpu->decoder;
     uint8_t cond_satisfy = 0;
+    const union ins_t ins = {
+        .word = dec->instruction_word,
+    };
     
-    uint8_t cond = (dec->instruction_word >> 28)&0xf;  /* bit[31:28] */
-    switch(cond) {
+    switch(ins.dp_is.cond) {
     case 0x0:
         cond_satisfy = (cpsr_z(cpu) == 1);
         break;
@@ -634,768 +1472,25 @@ void decode(struct armv4_cpu_t *cpu)
         PRINTF("cond_satisfy = %d skip...\r\n", cond_satisfy);
         return;
     }
-    
 
-
-
-    uint8_t Rn;
-    uint8_t Rd;
-    uint8_t Rs;
-    uint8_t Rm;
-    uint16_t immediate = 0;
-    int32_t b_offset = 0;
-    uint8_t opcode;
-    uint8_t shift;
-    uint8_t rotate_imm;
-    uint8_t shift_amount;
-    uint8_t Lf = 0, Bf = 0, Uf = 0, Pf = 0, Wf = 0;
-    uint8_t Bit22, Bit20, Bit7, Bit4;
-    uint8_t Bit24_23;
-
-
-    uint8_t f = (dec->instruction_word >> 25)&0x7;  /* bit[27:25] */
-    opcode = (dec->instruction_word >> 21)&0xf;  /* bit[24:21] */
-    Bit24_23 = opcode >> 2;  /* bit[24:23] */
-    Bit22 = IS_SET(dec->instruction_word, 22);  /* bit[22] */
-    Bit20 = IS_SET(dec->instruction_word, 20);  /* bit[20] */
-    Rn = (dec->instruction_word >> 16)&0xf;  /* bit[19:16] */
-    Rd = (dec->instruction_word >> 12)&0xf;  /* bit[15:12] */
-    Rs = (dec->instruction_word >> 8)&0xf;  /* bit[11:8] */
-    rotate_imm = Rs;  /* bit[11:8] */
-    shift_amount = (dec->instruction_word >> 7)&0x1f;  /* bit[11:7] */
-    shift = (dec->instruction_word >> 5)&0x3;  /* bit[6:5] */
-    Bit4 = IS_SET(dec->instruction_word, 4);  /* bit[4] */
-    Rm = (dec->instruction_word&0xF);  /* bit[3:0] */
-
-    uint8_t code_type = code_is_unknow;
-    switch(f) {
-    case 0:
-        switch(Bit4) {
-        case 0:
-            if( (Bit24_23 == 2 ) && !Bit20 ) {
-                //Miscellaneous instructions
-                uint8_t Bit21 = (dec->instruction_word&0x200000) >> 21;  /* bit[21] */
-                uint8_t Bit7 = (dec->instruction_word&0x80) >> 7;  /* bit[7] */
-                if(Bit21 && !Bit7) {
-                    code_type = code_is_msr0;
-                    PRINTF("msr0 %sPSR_%d  R%d\r\n", Bit22?"S":"C", Rn, Rm);
-                } else if(!Bit21 && !Bit7) {
-                    code_type = code_is_mrs;
-                    PRINTF("mrs R%d %s\r\n", Rd, Bit22?"SPSR":"CPSR");
-                } else {
-                    //ERROR("undefined bit7 error \r\n");
-                }
-            } else {
-                //Data processing register shift by immediate
-                code_type = code_is_dp0;
-                PRINTF("dp0 %s dst register R%d, first operand R%d, Second operand R%d[0x%x] %s immediate #0x%x\r\n",
-                 opcode_table[opcode], Rd, Rn, Rm, register_read(cpu, Rm), shift_table[shift], shift_amount);
-            }
-            break;
-        case 1:
-            Bit7 = (dec->instruction_word&0x80) >> 7;  /* bit[7] */
-            switch(Bit7) {
-            case 0:
-                if( (Bit24_23 == 2 ) && !Bit20 ) {
-                    //Miscellaneous instructions
-                    if(!IS_SET(dec->instruction_word, 22) && IS_SET(dec->instruction_word, 21) && !IS_SET(dec->instruction_word, 6) ) {
-                        //Branch/exchange
-                        code_type = code_is_bx;
-                        Lf = IS_SET(dec->instruction_word, 5); //L bit
-                        PRINTF("bx B%sX R%d\r\n", Lf?"L":"", Rm);
-                    } else if(IS_SET(dec->instruction_word, 6) && !IS_SET(dec->instruction_word, 5) ) {
-                        //Enhanced DSP add/subtracts
-                        //ERROR("Enhanced DSP add/subtracts R%d\r\n", Rm);
-                    } else if(IS_SET(dec->instruction_word, 6) && IS_SET(dec->instruction_word, 5)) {
-                        //Software breakpoint
-                        //ERROR("Software breakpoint \r\n");
-                    } else if(!IS_SET(dec->instruction_word, 6) && !IS_SET(dec->instruction_word, 5) && opcode == 0xb) {
-                        //Count leading zero
-                        //ERROR("Count leading zero \r\n");
-                    } else {
-                        //ERROR("Undefed Miscellaneous instructions\r\n");
-                    }
-                } else {
-                    //Data processing register shift by register
-                    code_type = code_is_dp1;
-                    PRINTF("dp1 %s dst register R%d, first operand R%d, Second operand R%d %s R%d\r\n",
-                     opcode_table[opcode], Rd, Rn, Rm, shift_table[shift], Rs);
-                }
-                break;
-            case 1:
-                //Multiplies, extra load/stores
-                Lf = IS_SET(dec->instruction_word, 20); //L bit
-                Bf = IS_SET(dec->instruction_word, 22); //B bit
-                Uf = IS_SET(dec->instruction_word, 23);  //U bit
-                Pf = (opcode >> 3) & 1; //P bit[24]
-                Wf = opcode & 1;  //W bit[21]
-                switch(shift) {
-                case 0:
-                    if(Bit24_23 == 0) {
-                        code_type = code_is_mult;
-                        if( IS_SET(dec->instruction_word, 21) ) {
-                            PRINTF("mult MUA%s R%d <= R%d * R%d + R%d\r\n", Bit20?"S":"", Rn, Rm, Rs, Rd);
-                        } else {
-                            PRINTF("mult MUL%s R%d <= R%d * R%d\r\n", Bit20?"S":"", Rn, Rm, Rs);
-                        }
-                    } else if(Bit24_23 == 1) {
-                        code_type = code_is_multl;
-                        PRINTF("multl %sM%s [R%d L, R%d H] %s= R%d * R%d\r\n", Bit22?"S":"U",
-                         IS_SET(dec->instruction_word, 21)?"LAL":"ULL", Rd, Rn, IS_SET(dec->instruction_word, 21)?"+":"", Rm, Rs);
-                    } else if(Bit24_23 == 2) {
-                        code_type = code_is_swp;
-                        PRINTF("swp \r\n");
-                    }
-                    break;
-                case 1:
-                    //code_is_ldrh
-                    if(Bit22) {
-                        code_type = code_is_ldrh1;
-                        immediate = (Rs << 4) | Rm;
-                        if(Pf) {
-                            PRINTF("ldrh1 %sH R%d, [R%d, immediate %s#%d] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
-                        } else {
-                            PRINTF("ldrh1 %sH R%d, [R%d], immediate %s#%d %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
-                        }
-                    } else {
-                        code_type = code_is_ldrh0;
-                        if(Pf) {
-                            PRINTF("ldrh0 %sH R%d, [R%d, %s[R%d] ] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-                        } else {
-                            PRINTF("ldrh0 %sH R%d, [R%d], %s[R%d] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-                        }
-                    }
-                    break;
-                case 2:
-                    //code_is_ldrsb
-                    if(Bit22) {
-                        code_type = code_is_ldrsb1;
-                        immediate = (Rs << 4) | Rm;
-                        if(Pf) {
-                            PRINTF("ldrsb1 %sSB R%d, [R%d, immediate %s#%d] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
-                        } else {
-                            PRINTF("ldrsb1 %sSB R%d, [R%d], immediate %s#%d %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
-                        }
-                    } else {
-                        code_type = code_is_ldrsb0;
-                        if(Pf) {
-                            PRINTF("ldrsb0 %sSB R%d, [R%d, %s[R%d] ] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-                        } else {
-                            PRINTF("ldrsb0 %sSB R%d, [R%d], %s[R%d] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-                        }
-                    }
-                    if(!Lf) {
-                        code_type = code_is_unknow;
-                        //ERROR("undefed LDRD\r\n");
-                    }
-                    break;
-                case 3:
-                    //code_is_ldrsh
-                    if(Bit22) {
-                        code_type = code_is_ldrsh1;
-                        immediate = (Rs << 4) | Rm;
-                        if(Pf) {
-                            PRINTF("ldrsh1 %sSH R%d, [R%d, immediate %s#%d] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
-                        } else {
-                            PRINTF("ldrsh1 %sSH R%d, [R%d], immediate %s#%d %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
-                        }
-                    } else {
-                        code_type = code_is_ldrsh0;
-                        if(Pf) {
-                            PRINTF("ldrsh0 %sSH R%d, [R%d, %s[R%d] ] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-                        } else {
-                            PRINTF("ldrsh0 %sSH R%d, [R%d], %s[R%d] %s\r\n",
-                             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-                        }
-                    }
-                    if(!Lf) {
-                        code_type = code_is_unknow;
-                        //ERROR("undefed STRD\r\n");
-                    }
-                    break;
-                default:
-                    ;
-                    //ERROR("undefed shift\r\n");
-                }
-                break;
-            default:
-                ;
-                //ERROR("undefed Bit7\r\n");
-            }
-            break;
-        default:
-            ;
-            //ERROR("undefed Bit4\r\n");
-        }
-        break;
-    case 1:
-        //Data processing immediate and move immediate to status register
-        if( (opcode == 0x9 || opcode == 0xb ) && !Bit20 ) {
-            code_type = code_is_msr1;
-            immediate = dec->instruction_word&0xff;
-            PRINTF("msr1 MSR %sPSR_%d  immediate [#%d ROR %d]\r\n", Bit22?"S":"C", Rn, immediate, rotate_imm*2);
-        } else if( (opcode == 0x8 || opcode == 0xa ) && !Bit20 ) {
-            PRINTF("undefined instruction\r\n");
-        } else {
-            //Data processing immediate
-            code_type = code_is_dp2;
-            immediate = dec->instruction_word&0xff;
-            PRINTF("dp2 %s dst register R%d, first operand R%d, Second operand immediate [#%d ROR %d]\r\n",
-             opcode_table[opcode], Rd, Rn, immediate, rotate_imm*2);
-        }
-        break;
-    case 2:
-        //load/store immediate offset
-        code_type = code_is_ldr0;
-        immediate = dec->instruction_word&0xFFF;
-        Lf = IS_SET(dec->instruction_word, 20); //L bit
-        Bf = IS_SET(dec->instruction_word, 22); //B bit
-        Uf = IS_SET(dec->instruction_word, 23); //U bit
-        Pf = (opcode >> 3) & 1; //P bit[24]
-        Wf = opcode & 1;  //W bit[21]
-        if(Pf) {
-            PRINTF("ldr0 %s%s dst register R%d, [base address at R%d, Second address immediate #%s0x%x] %s\r\n",
-             Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-", immediate, Wf?"!":"");
-        } else {
-            PRINTF("ldr0 %s%s dst register R%d, [base address at R%d], Second address immediate #%s0x%x\r\n",
-             Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-", immediate);
-        }
-        
-        break;
-    case 3:
-        //load/store register offset
-        if(!Bit4) {
-            code_type = code_is_ldr1;
-            Lf = IS_SET(dec->instruction_word, 20); //L bit
-            Bf = IS_SET(dec->instruction_word, 22); //B bit
-            Uf = IS_SET(dec->instruction_word, 23); //U bit
-            Pf = (opcode >> 3) & 1; //P bit[24]
-            Wf = opcode & 1;  //W bit[21]
-            if(Pf) {
-                PRINTF("ldr1 %s%s dst register R%d, [base address at R%d, offset address at %s[R%d(0x%x) %s %d]] %s\r\n",
-                 Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, register_read(cpu, Rm), shift_table[shift], shift_amount, Wf?"!":"");
-            } else {
-                PRINTF("ldr1 %s%s dst register R%d, [base address at R%d], offset address at %s[R%d %s %d] \r\n",
-                 Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",  Rm, shift_table[shift], shift_amount);
-            }
-            
-        } else {
-            //ERROR("undefined instruction\r\n");
-        }
-        break;
-    case 4:
-        //load/store multiple
-        code_type = code_is_ldm;
-        Lf = IS_SET(dec->instruction_word, 20); //L bit
-        Uf = IS_SET(dec->instruction_word, 23);  //U bit
-        Pf = opcode >> 3;  //P bit
-        Wf = opcode & 1;
-        PRINTF("ldm %s%s%s R%d%s \r\n", Lf?"LDM":"STM", Uf?"I":"D", Pf?"B":"A",  Rn, Wf?"!":"");
-        Rn = (dec->instruction_word >> 16)&0xf;
-        break;
-    case 5:
-        //branch
-        code_type = code_is_b;
-        if( (dec->instruction_word&0xFFFFFF) >> 23) {
-            //-
-            b_offset = (dec->instruction_word&0x7FFFFF)|0xFF800000;
-        } else {
-            //+
-            b_offset = dec->instruction_word&0x7FFFFF;
-        }
-        b_offset <<= 2;
-        Lf = IS_SET(dec->instruction_word, 24); //L bit
-        PRINTF("B%s PC[0x%x] +  0x%08x = 0x%x\r\n",
-         Lf?"L":"", register_read(cpu, 15), b_offset, register_read(cpu, 15) + b_offset );
-        break;
-    case 6:
-        //Coprocessor load/store and double register transfers
-        //ERROR("Coprocessor todo... \r\n");
-        break;
-    case 7:
-        //software interrupt
-        if(IS_SET(dec->instruction_word, 24)) {
-            code_type = code_is_swi;
-            PRINTF("swi \r\n");
-        } else {
-            if(Bit4) {
-                //Coprocessor move to register
-                code_type = code_is_mcr;
-                PRINTF("mcr \r\n");
-            } else {
-                //ERROR("Coprocessor data processing todo... \r\n");
-            }
-        }
-        break;
-    default:
-        ;
-        //ERROR("unsupported code\r\n");
-    }
-
-    //return cond_satisfy;
-
+    uint8_t code_type = code_decoder(ins);
+    if(DEBUG)
+        code_debug(ins, code_type);
 
     //----------------------------------------------------------------------------------------------------------
     //----------------------------------------------------------------------------------------------------------
     //execute
-    uint32_t operand1 = register_read(cpu, Rn);
-    uint32_t operand2 = register_read(cpu, Rm);
-    uint32_t rot_num = register_read(cpu, Rs);
-    uint8_t add_flag = 1;
-    /*
-     * 0: turn off shifter
-     * 3: PD(is) On
-     * 4: DP(rs) On
-     * 5: DP(i) On
-    */
-    uint8_t shifter_flag = 0;
-    uint32_t carry = 0;
-    
-    switch(code_type) {
-    case code_is_dp2:
-        //immediate
-        operand2 = immediate;
-        rot_num = rotate_imm<<1;
-        shift = 3;  //use ROR Only
-        shifter_flag = 5;  //DP(i) On
-        break;
-    case code_is_b:
-        operand1 = b_offset;
-        operand2 = register_read(cpu, 15);
-        rot_num = 0;
-        shifter_flag = 0;  //no need to use shift
-        break;
-    case code_is_ldr0:
-    case code_is_ldrh1:
-    case code_is_ldrsb1:
-    case code_is_ldrsh1:
-        operand2 = immediate;
-        //no need to use shift
-        shifter_flag = 0;
-        break;
-    case code_is_dp0:
-    case code_is_ldr1:
-        //immediate shift
-        rot_num = shift_amount;
-        shifter_flag = 3;  //PD(is) On
-        break;
-    case code_is_ldrsb0:
-    case code_is_ldrsh0:
-    case code_is_ldrh0:
-        //no need to use shift
-        shifter_flag = 0;
-        break;
-    case code_is_msr1:
-        operand1 = 0;  //msr don't support
-        operand2 = immediate;
-        rot_num = rotate_imm<<1;
-        shift = 3;
-        shifter_flag = 5;  //DP(i) On
-        break;
-    case code_is_msr0:
-        operand1 = 0;  //msr don't support
-        //no need to use shift
-        shifter_flag = 0;
-        break;
-    case code_is_dp1:
-        //register shift
-        //No need to use
-        shifter_flag = 4;  //DP(rs) On
-        break;
-    case code_is_bx:
-        operand1 = 0;
-        rot_num = 0;
-        //no need to use shift
-        shifter_flag = 0;
-        break;
-    case code_is_ldm:
-        operand2 = 0;  //increase After
-        rot_num = 0;
-        shifter_flag = 0;  //no need to use shift
-        break;
-    case code_is_mult:
-        operand2 = operand2 * rot_num;
-        shifter_flag = 0;  //no need to use shift
-        break;
-    case code_is_multl:
-        do{
-            uint64_t multl_long = 0;
-            uint8_t negative = 0;
-            if(Bit22) {
-                //Signed
-                if(IS_SET(operand2, 31)) {
-                    operand2 = ~operand2 + 1;
-                    negative++;
-                }
-                
-                if(IS_SET(rot_num, 31)) {
-                    rot_num = ~rot_num + 1;
-                    negative++;
-                }
-            }
-            
-            multl_long = (uint64_t)operand2 * rot_num;
-            if( negative == 1 ) {
-                //Set negative sign
-                multl_long = ~(multl_long - 1);
-            }
-            
-            if(opcode&1) {
-                multl_long += ( ((uint64_t)register_read(cpu, Rn) << 32) | register_read(cpu, Rd));
-            }
-            
-            register_write(cpu, Rn, multl_long >> 32);
-            register_write(cpu, Rd, multl_long&0xffffffff);
-            PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n",
-             register_read(cpu, Rn), Rn, register_read(cpu, Rd), Rd, operand2, rot_num);
-            
-            if(Bit20) {
-                //Update CPSR register
-                uint8_t out_sign = IS_SET(multl_long, 63);
-                
-                cpsr_n_set(cpu, out_sign);
-                cpsr_z_set(cpu, multl_long == 0);
-                //cv unaffected
-                PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
-            }
-            
-            return;
-        }while(0);
-        break;
-    case code_is_swi:
-        cpu->decoder.event_id = EVENT_ID_SWI;
-        return;
-        break;
-    case code_is_mrs:
-        shifter_flag = 0;  //no need to use shift
-        break;
-    case code_is_mcr:
-        do{
-            shifter_flag = 0;  //no need to use shift
-            uint8_t op2 = (dec->instruction_word >> 5)&0x7;
-            //  cp_num       Rs
-            //  register     Rd
-            //  cp_register  Rn
-            if(Bit20) {
-                //mrc
-                if(Rs == 15) {
-                    uint32_t cp15_val;
-                    if(Rn) {
-                        cp15_val = cp15_read(&cpu->mmu, Rn);
-                    } else {
-                        //register 0
-                        if(op2) {
-                            //Cache Type register
-                            cp15_val = 0;
-                            //printf("Cache Type register\r\n");
-                        } else {
-                            //Main ID register
-                            cp15_val = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5;
-                        }
-                    }
-                    register_write(cpu, Rd, cp15_val);
-                    PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, Rn, cp15_val, op2, Rd);
-                } else {
-                    ERROR("read unsupported cp%d_c%d \r\n", Rs, Rn);
-                }
-            } else {
-                //mcr
-                uint32_t register_val = register_read(cpu, Rd);
-                if(Rs == 15) {
-                    cp15_write(&cpu->mmu, Rn, register_val);
-                    PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, Rs, Rn);
-                } else {
-                    ERROR("write unsupported cp%d_c%d \r\n", Rs, Rn);
-                }
-            }
-            return;
-        }while(0);
-        break;
-    case code_is_swp:
-        do {
-            /* op1, Rn
-             * op2, Rm
-             */
-            uint32_t tmp = read_word(cpu, operand1);
-            if(mmu_check_status(&cpu->mmu)) {
-                cpu->decoder.event_id = EVENT_ID_DATAABT;
-                return;
-            }
-            write_word(cpu, operand1, operand2);
-            register_write(cpu, Rd, tmp);
-            
-            return;
-        }while(0);
-        break;
-    default:
-        cpu->decoder.event_id = EVENT_ID_UNDEF;
-        return;
-    }
-    
-    /******************shift**********************/
-    //operand2 << rot_num
-    uint8_t shifter_carry_out = 0;
-    if(shifter_flag) {
-        switch(shift) {
-        case 0:
-            //LSL
-            if(shifter_flag == 3) {
-                //PD(is) On
-                if(rot_num == 0) {
-                    shifter_carry_out = cpsr_c(cpu);
-                } else {
-                    shifter_carry_out = IS_SET(operand2, 32 - rot_num);
-                    operand2 = operand2 << rot_num;
-                }
-            } else if(shifter_flag == 4) {
-                //DP(rs) On
-                if((rot_num&0xff) == 0) {
-                    shifter_carry_out = cpsr_c(cpu);
-                } else if((rot_num&0xff) < 32) {
-                    shifter_carry_out = IS_SET(operand2, 32 - rot_num);
-                    operand2 = operand2 << rot_num;
-                } else if((rot_num&0xff) == 32) {
-                    shifter_carry_out = operand2&1;
-                    operand2 = 0;
-                } else /* operand2 > 32 */ {
-                    shifter_carry_out = 0;
-                    operand2 = 0;
-                }
-            }
-            
-            break;
-        case 1:
-            //LSR
-            if(shifter_flag == 3) {
-                //PD(is) On
-                if(rot_num == 0) {
-                    shifter_carry_out = IS_SET(operand2, 31);
-                    operand2 = 0;
-                } else {
-                    shifter_carry_out = IS_SET(operand2, rot_num-1);
-                    operand2 = operand2 >> rot_num;
-                }
-            } else if(shifter_flag == 4) {
-                //DP(rs) On
-                if((rot_num&0xff) == 0) {
-                    shifter_carry_out = cpsr_c(cpu);
-                } else if((rot_num&0xff) < 32) {
-                    shifter_carry_out = IS_SET(operand2, rot_num-1);
-                    operand2 = operand2 >> rot_num;
-                } else if((rot_num&0xff) == 32) {
-                    shifter_carry_out = IS_SET(operand2, 31);
-                    operand2 = 0;
-                } else /* operand2 > 32 */ {
-                    shifter_carry_out = 0;
-                    operand2 = 0;
-                }           
-            }
+    uint8_t carry_out = cpsr_c(cpu);
+    uint8_t bit_ov = cpsr_v(cpu);
+    uint32_t operand1 = register_read(cpu, Rn); //19_16
+    uint32_t operand2 = code_shifter(cpu, ins, code_type, &carry_out);
+    uint32_t aluout = code_alu(cpu, ins, code_type, operand1, operand2, &carry_out, &bit_ov);
 
-            break;
-        case 2:
-            //ASR
-            if(shifter_flag == 3) {
-                //PD(is) On
-                if(rot_num == 0) {
-                    shifter_carry_out = IS_SET(operand2, 31);
-                    if(!IS_SET(operand2, 31)) {
-                        operand2 = 0;
-                    } else {
-                        operand2 = 0xffffffff;
-                    }
-                } else {
-                    shifter_carry_out = IS_SET(operand2, rot_num-1);
-                    operand2 = (int32_t)operand2 >> rot_num;
-                }
-            } else if(shifter_flag == 4) {
-                //DP(rs) On
-                if((rot_num&0xff) == 0) {
-                    shifter_carry_out = cpsr_c(cpu);
-                } else if((rot_num&0xff) < 32) {
-                    shifter_carry_out = IS_SET(operand2, rot_num-1);
-                    operand2 = (int32_t)operand2 >> rot_num;
-                } else /* operand2 >= 32 */ {
-                    if(!IS_SET(operand2, 31)) {
-                        shifter_carry_out = IS_SET(operand2, 31);
-                        operand2 = 0;
-                    } else {
-                        shifter_carry_out = IS_SET(operand2, 31);
-                        operand2 = 0xffffffff;
-                    }
-                }     
-            }
-            
-            break;
-        case 3:
-            //ROR, RRX
-            if(shifter_flag == 5) {
-                //DP(i)
-                operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
-                if(rot_num == 0) {
-                     shifter_carry_out = cpsr_c(cpu);
-                } else {
-                    shifter_carry_out = IS_SET(operand2, 31);
-                }   
-            } else if(shifter_flag == 3) {
-                //PD(is) ROR On
-                if(rot_num == 0) {
-                    //RRX
-                    shifter_carry_out = operand2&1;
-                    operand2 = (cpsr_c(cpu) << 31) | (operand2 >> 1);
-                } else {
-                    //ROR
-                    shifter_carry_out = IS_SET(operand2, rot_num-1);
-                    operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
-                }
-            } else if(shifter_flag == 4) {
-                //DP(rs) ROR On
-                if((rot_num&0xff) == 0) {
-                    shifter_carry_out = cpsr_c(cpu);
-                } else if((rot_num&0x1f) == 0) {
-                    shifter_carry_out = IS_SET(operand2, 31);
-                } else /* rot_num > 0 */ {
-                    shifter_carry_out = IS_SET(operand2, rot_num-1);
-                    operand2 = (operand2 << (32 - rot_num) | operand2 >> rot_num);
-                }
-            }
-            
-            break;
-        }
-    }
-    
-    
-    /******************shift end*******************/
-    
-    switch(code_type) {
-    case code_is_dp0:
-    case code_is_dp1:
-    case code_is_dp2:
-        switch(opcode) {
-        case 0:
-        case 8:
-            //AND, TST
-            operand1 &= operand2;
-            operand2 = 0;
-            break;
-        case 1:
-        case 9:
-            //EOR, TEQ
-            operand1 ^= operand2;
-            operand2 = 0;
-            break;
-        case 2:
-        case 10:
-            //SUB, CMP
-            add_flag = 0;
-            break;
-        case 3:
-            //RSB
-            {
-                uint32_t tmp = operand1;
-                operand1 = operand2;
-                operand2 = tmp;
-            }
-            add_flag = 0;
-            break;
-        case 4:
-        case 11:
-            //ADD, CMN
-            break;
-        case 5:
-            //ADC
-            carry = cpsr_c(cpu);  //todo...
-            break;
-        case 6:
-            //SBC
-            carry = !cpsr_c(cpu);  //todo...
-            add_flag = 0;
-            break;
-        case 7:
-            //RSC
-            carry = !cpsr_c(cpu);  //todo...
-            uint32_t tmp = operand1;
-            operand1 = operand2;
-            operand2 = tmp;
-            add_flag = 0;
-            break;
-        case 12:
-            //ORR
-            operand1 |= operand2;
-            operand2 = 0;
-            break;
-        case 13:
-            //MOV
-            operand1 = 0;
-            break;
-        case 14:
-            //BIC
-            operand1 &= ~operand2;
-            operand2 = 0;
-            break;
-        case 15:
-            //MVN
-            operand1 = 0;
-            operand2 = ~operand2;
-            break;
-        default:
-            break;
-        }
-        break;
-    case code_is_ldr0:
-    case code_is_ldr1:
-    case code_is_ldrsb1:
-    case code_is_ldrsh1:
-    case code_is_ldrh1:
-    case code_is_ldrsb0:
-    case code_is_ldrsh0:
-    case code_is_ldrh0:
-        if(Uf)
-            add_flag = 1;
-        else
-            add_flag = 0;
-        break;
-    case code_is_mult:
-        switch(opcode) {
-        case 1:
-            operand1 = register_read(cpu, Rd);  //Rd and Rn swap, !!!
-            break;
-        case 0:
-            operand1 = 0;
-            break;
-        }
-        break;
-    default:
-        break;
-    }
-    
-    /**************************alu*************************/
-    
-    uint32_t sum_middle = add_flag?
-        ((operand1&0x7fffffff) + (operand2&0x7fffffff) + carry):
-        ((operand1&0x7fffffff) - (operand2&0x7fffffff) - carry);
-    uint32_t cy_high_bits =  add_flag?
-        (IS_SET(operand1, 31) + IS_SET(operand2, 31) + IS_SET(sum_middle, 31)):
-        (IS_SET(operand1, 31) - IS_SET(operand2, 31) - IS_SET(sum_middle, 31));
-    uint32_t aluout = ((cy_high_bits&1) << 31) | (sum_middle&0x7fffffff);
-    PRINTF("[ALU]op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", operand1, operand2, carry, aluout);
-    
-    /**************************alu end*********************/
 
     switch(code_type) {
-    case code_is_dp0:
-    case code_is_dp1:
-    case code_is_dp2:
+    case code_type_dp0:
+    case code_type_dp1:
+    case code_type_dp2:
         if(Bit24_23 == 2) {
             PRINTF("update flag only \r\n");
         } else {
@@ -1408,24 +1503,8 @@ void decode(struct armv4_cpu_t *cpu)
             
             cpsr_n_set(cpu, out_sign);
             cpsr_z_set(cpu, aluout == 0);
-            
-            uint8_t bit_cy = (cy_high_bits>>1)&1;
-            uint8_t bit_ov = (bit_cy^IS_SET(sum_middle, 31))&1;
-            
-            if(opcode == 11 || opcode == 4 || opcode == 5) {
-                //CMN, ADD, ADC
-                cpsr_c_set(cpu, bit_cy );
-                cpsr_v_set(cpu, bit_ov );
-            } else if(opcode == 10 || opcode == 2 || opcode == 6 || opcode == 3 || opcode == 7) {
-                //CMP, SUB, SBC, RSB, RSC
-                cpsr_c_set(cpu, !bit_cy );
-                cpsr_v_set(cpu, bit_ov );
-            } else if(shifter_flag) {
-                //TST, TEQ, ORR, MOV, MVN
-                cpsr_c_set(cpu, shifter_carry_out );
-                //c shifter_carry_out
-                //v unaffected
-            }
+            cpsr_c_set(cpu, carry_out );
+            cpsr_v_set(cpu, bit_ov );
             
             PRINTF("[DP] update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
             
@@ -1436,9 +1515,9 @@ void decode(struct armv4_cpu_t *cpu)
             }
         }
         break;
-    case code_is_bx:
-    case code_is_b:
-        if(Lf) {
+    case code_type_bx:
+    case code_type_b:
+        if((code_type == code_type_bx)?Lf_bx:Lf_b) {
             register_write(cpu, 14, register_read(cpu, 15) - 4);  //LR register
             PRINTF("write register R%d = 0x%0x, ", 14, register_read(cpu, 14));
         }
@@ -1449,56 +1528,78 @@ void decode(struct armv4_cpu_t *cpu)
         register_write(cpu, 15, aluout & 0xfffffffc);  //PC register
         PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
         break;
-    case code_is_ldr0:
-    case code_is_ldr1:
-    case code_is_ldrsb1:
-    case code_is_ldrsh1:
-    case code_is_ldrh1:
-    case code_is_ldrsb0:
-    case code_is_ldrsh0:
-    case code_is_ldrh0:
+    case code_type_swp:
+        /* op1, Rn
+         * op2, Rm
+         */
+        if(Bf) {
+            //SWPB 4.1.52 todo...
+            ERROR("swpb\n");
+        } else {
+            //SWP
+            uint32_t aluout = read_word(cpu, operand1);
+            if(mmu_check_status(&cpu->mmu)) {
+                cpu->decoder.event_id = EVENT_ID_DATAABT;
+                return;
+            }
+            write_word(cpu, operand1, operand2);
+            register_write(cpu, Rd, aluout);
+        }
+        break;
+    case code_type_ldr0:
+    case code_type_ldr1:
+    case code_type_ldrsb1:
+    case code_type_ldrsh1:
+    case code_type_ldrh1:
+    case code_type_ldrsb0:
+    case code_type_ldrsh0:
+    case code_type_ldrh0:
     {
-        uint32_t address = operand1;  //Rn
+        uint32_t address = operand1;  //memory address
         uint32_t data;
         if(Pf) {
-            //first add
-            address = aluout;  //aluout
+            address = aluout;
         }
         
         uint32_t tmpcpsr = cpsr(cpu);
-        if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+        uint8_t ldrt = 0;
+        if(!Pf && Wf && (code_type == code_type_ldr0 || code_type == code_type_ldr1) ) {
             //LDRT as user mode
             cpsr(cpu) &= 0x1f;
             cpsr(cpu) |= CPSR_M_USR;
+            ldrt = 1;
         }
         
         if(Lf) {
             //LDR
-            if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
+            switch(code_type) {
+            case code_type_ldrh1:
+            case code_type_ldrh0:
                 //Halfword
                 data = read_halfword(cpu, address);
-            } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
+                break;
+            case code_type_ldrsh1:
+            case code_type_ldrsh0:
                 //Halfword Signed
                 data = read_halfword(cpu, address);
                 if(data&0x8000) {
                     data |= 0xffff0000;
                 }
-            } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
+                break;
+            case code_type_ldrsb1:
+            case code_type_ldrsb0:
                 //Byte Signed
                 data = read_byte(cpu, address);
                 if(data&0x80) {
                     data |= 0xffffff00;
                 }
-            } else if(Bf) {
-                //Byte
-                data = read_byte(cpu, address);
-            } else {
-                //Word
-                data = read_word(cpu, address);
+                break;
+            default:
+                data = Bf?read_byte(cpu, address):read_word(cpu, address);
             }
             
             if(mmu_check_status(&cpu->mmu)) {
-                if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                if(ldrt) {
                     //LDRT restore cpsr
                     cpsr(cpu) = tmpcpsr;
                 }
@@ -1510,26 +1611,36 @@ void decode(struct armv4_cpu_t *cpu)
         } else {
             //STR
             data = register_read(cpu, Rd);
-            if(code_type == code_is_ldrh1 || code_type == code_is_ldrh0) {
+            switch(code_type) {
+            case code_type_ldrh1:
+            case code_type_ldrh0:
                 //Halfword
                 write_halfword(cpu, address, data);
-            } else if(code_type == code_is_ldrsh1 || code_type == code_is_ldrsh0) {
+                break;
+            case code_type_ldrsh1:
+            case code_type_ldrsh0:
                 //Halfword Signed ?
                 write_halfword(cpu, address, data);
                 printf("STRSH ? \r\n");
                 exception_out(cpu);
-            } else if(code_type == code_is_ldrsb1 || code_type == code_is_ldrsb0) {
+                break;
+            case code_type_ldrsb1:
+            case code_type_ldrsb0:
                 //Byte Signed ?
                 write_byte(cpu, address, data);
                 printf("STRSB ? \r\n");
                 exception_out(cpu);
-            } else if(Bf) {
-                write_byte(cpu, address, data);
-            } else {
-                write_word(cpu, address, data);
+                break;
+            default:
+                if(Bf) {
+                    write_byte(cpu, address, data);
+                } else {
+                    write_word(cpu, address, data);
+                }
             }
+
             if(mmu_check_status(&cpu->mmu)) {
-                if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+                if(ldrt) {
                     //LDRT restore cpsr
                     cpsr(cpu) = tmpcpsr;
                 }
@@ -1544,17 +1655,17 @@ void decode(struct armv4_cpu_t *cpu)
             PRINTF("[LDR]write register R%d = 0x%x\r\n", Rn, aluout);
         }
         
-        if(!Pf && Wf && (code_type == code_is_ldr0 || code_type == code_is_ldr1) ) {
+        if(ldrt) {
             //LDRT restore cpsr
             cpsr(cpu) = tmpcpsr;
         }
     }
         break;
-    case code_is_ldm:
+    case code_type_ldm:
         if(Lf) { //bit [20]
             //LDM
             uint8_t ldm_type = 0;
-            if(Bit22 && !IS_SET(dec->instruction_word, 15)) {
+            if(Bit22 && !IS_SET(ins.word, 15)) {
                 //LDM(2)
                 ldm_type = 1;
             }
@@ -1563,7 +1674,7 @@ void decode(struct armv4_cpu_t *cpu)
             uint32_t address = operand1;
             for(int i=0; i<16; i++) {
                 int n = (Uf)?i:(15-i);
-                if(IS_SET(dec->instruction_word, n)) {
+                if(IS_SET(ins.word, n)) {
                     if(Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
@@ -1617,7 +1728,7 @@ void decode(struct armv4_cpu_t *cpu)
             uint32_t address = operand1;
             for(int i=0; i<16; i++) {
                 int n = (Uf)?i:(15-i);
-                if(IS_SET(dec->instruction_word, n)) {
+                if(IS_SET(ins.word, n)) {
                     if(Pf) {
                         if(Uf) address += 4;
                         else address -= 4;
@@ -1649,8 +1760,8 @@ void decode(struct armv4_cpu_t *cpu)
             }
         }
         break;
-    case code_is_msr0:
-    case code_is_msr1:
+    case code_type_msr0:
+    case code_type_msr1:
     {
         uint8_t cpu_mode;
         if(!Bit22) {
@@ -1687,7 +1798,7 @@ void decode(struct armv4_cpu_t *cpu)
         PRINTF("write register spsr_%d = 0x%x\r\n", cpu_mode, cpu->spsr[cpu_mode]);
     }
         break;
-    case code_is_mult:
+    case code_type_mult:
         register_write(cpu, Rn, aluout);   //Rd and Rn swap, !!!
         PRINTF("[MULT] write register R%d = 0x%x\r\n", Rn, aluout);
         
@@ -1701,7 +1812,52 @@ void decode(struct armv4_cpu_t *cpu)
             PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
         }
         break;
-    case code_is_mrs:
+    case code_type_multl:
+    {
+        uint64_t multl_long = 0;
+        uint8_t negative = 0;
+        uint32_t rs_num = operand2;
+        uint32_t rm_num = register_read(cpu, Rs);
+        if(Bit22) {
+            //Signed
+            if(IS_SET(rm_num, 31)) {
+                rm_num = ~rm_num + 1;
+                negative++;
+            }
+            
+            if(IS_SET(rs_num, 31)) {
+                rs_num = ~rs_num + 1;
+                negative++;
+            }
+        }
+        
+        multl_long = (uint64_t)rm_num * rs_num;
+        if( negative == 1 ) {
+            //Set negative sign
+            multl_long = ~(multl_long - 1);
+        }
+        
+        if(opcode&1) {
+            multl_long += ( ((uint64_t)operand1 << 32) | register_read(cpu, Rd));
+        }
+        
+        register_write(cpu, Rn, multl_long >> 32);
+        register_write(cpu, Rd, multl_long&0xffffffff);
+        PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n",
+        register_read(cpu, Rn), Rn, register_read(cpu, Rd), Rd, rm_num, rs_num);
+        
+        if(Bit20) {
+            //Update CPSR register
+            uint8_t out_sign = IS_SET(multl_long, 63);
+            
+            cpsr_n_set(cpu, out_sign);
+            cpsr_z_set(cpu, multl_long == 0);
+            //cv unaffecteds
+            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
+        }
+    }
+        break;
+    case code_type_mrs:
         if(Bit22) {
             uint8_t mode = get_cpu_mode_code(cpu);
             register_write(cpu, Rd, cpu->spsr[mode]);
@@ -1711,63 +1867,35 @@ void decode(struct armv4_cpu_t *cpu)
             PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr(cpu));
         }
         break;
-    default:
-        ERROR("unsupport code %d\r\n", code_type );
+    case code_type_mcr:
+        //  cp_num       Rs
+        //  register     Rd
+        //  cp_register  Rn
+        if(Bit20) {
+            //mrc
+            if(ins.mcr.cp_num == 15) {
+                uint32_t cp15_val = cp15_read(&cpu->mmu, ins.mcr.opcode2, ins.mcr.CRn);
+                register_write(cpu, Rd, cp15_val);
+                PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, ins.mcr.CRn, cp15_val, ins.mcr.opcode2, Rd);
+            } else {
+                ERROR("read unsupported cp%d_c%d \r\n", Rs, ins.mcr.CRn);
+            }
+        } else {
+            //mcr
+            uint32_t register_val = register_read(cpu, Rd);
+            if(ins.mcr.cp_num == 15) {
+                cp15_write(&cpu->mmu, ins.mcr.opcode2, ins.mcr.CRn, register_val);
+                PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, ins.mcr.cp_num, ins.mcr.CRn);
+            } else {
+                ERROR("write unsupported cp%d_c%d \r\n", Rs, ins.mcr.CRn);
+            }
+        }
+        break;
+    case code_type_swi:
         break;
     }
 }
 
-
-
-
-
-void cpu_init(struct armv4_cpu_t *cpu)
-{
-    memset(cpu, 0, sizeof(struct armv4_cpu_t));
-    cpsr(cpu) = CPSR_M_SVC;
-    cpsr_i_set(cpu, 1);  //disable irq
-    cpsr_f_set(cpu, 1);  //disable fiq
-    cp15_reset(&cpu->mmu);
-}
-
-void fetch(struct armv4_cpu_t *cpu)
-{
-    uint32_t pc = register_read(cpu, 15) - 4; //current pc
-    if(((pc&3) != 0)) {
-        PRINTF("[FETCH] error, pc[0x%x] overflow \r\n", pc);
-        exception_out(cpu);
-    }
-    
-    cpu->decoder.instruction_word = read_word(cpu, pc);
-    PRINTF("[0x%04x]: ", pc);
-    register_write(cpu, 15, pc + 4 ); //current pc add 4
-    if(mmu_check_status(&cpu->mmu)) {
-        cpu->decoder.event_id = EVENT_ID_PREAABT;
-    }
-}
-
-
-/*
- * exception_out
- * author:hxdyxd
- */
-void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link, int number)
-{
-    cpu->peripheral.link = link;
-    cpu->peripheral.number = number;
-    for(int i=0; i<cpu->peripheral.number; i++) {
-        if(cpu->peripheral.link[i].reset) {
-            if(cpu->peripheral.link[i].reset(cpu->peripheral.link[i].reg_base)) {
-                WARN("[%d]%s register at 0x%08x, size %d\n",
-                    i, cpu->peripheral.link[i].name, cpu->peripheral.link[i].prefix, (~cpu->peripheral.link[i].mask)+1);
-            } else {
-                cpu->peripheral.link[i].reset = NULL;
-                cpu->peripheral.link[i].read = NULL;
-                cpu->peripheral.link[i].write = NULL;
-            }
-        }
-    }
-}
 
 
 /*****************************END OF FILE***************************/
