@@ -256,7 +256,9 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, cons
                         uart->IIR = UART_IIR_THRI; // THR empty interrupt pending
                     }
                     return event;
-                } else  if( (uart->IER & UART_IER_RDI) && code_counter%kips_speed == (kips_speed/2) && uart->readable() ) {
+                } else  if( (uart->IER & UART_IER_RDI) &&
+                 code_counter%kips_speed == (kips_speed/2) &&
+                  uart->readable() ) {
                     //Avoid calling kbhit functions frequently
                     //Bit0, Enable Received Data Available Interrupt. 
                     if((event = interrupt_happen(intc, uart->interrupt_id)) != 0 ) {

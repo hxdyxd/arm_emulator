@@ -165,19 +165,19 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, ui
 /*  memory */
 #define  is_privileged(cpu)            (cpsr_m(cpu) != CPSR_M_USR)
 
-#define  read_word_without_mmu(cpu,a)       read_mem(cpu,0,a,0,3)
-#define  read_word(cpu,a)                 read_mem(cpu,is_privileged(cpu),a,1,3)
-#define  read_halfword(cpu,a)             (read_mem(cpu,is_privileged(cpu),a,1,1) & 0xffff)
-#define  read_byte(cpu,a)                 (read_mem(cpu,is_privileged(cpu),a,1,0) & 0xff)
+#define  read_word_without_mmu(cpu,a)   read_mem(cpu,0,a,0,3)
+#define  read_word(cpu,a)               read_mem(cpu,is_privileged(cpu),a,1,3)
+#define  read_halfword(cpu,a)           (read_mem(cpu,is_privileged(cpu),a,1,1) & 0xffff)
+#define  read_byte(cpu,a)               (read_mem(cpu,is_privileged(cpu),a,1,0) & 0xff)
 
-#define  read_word_mode(cpu,m,a)                 read_mem(cpu,m,a,1,3)
-#define  read_halfword_mode(cpu,m,a)             (read_mem(cpu,m,a,1,1) & 0xffff)
-#define  read_byte_mode(cpu,m,a)                 (read_mem(cpu,m,a,1,0) & 0xff)
+#define  read_word_mode(cpu,m,a)        read_mem(cpu,m,a,1,3)
+#define  read_halfword_mode(cpu,m,a)    (read_mem(cpu,m,a,1,1) & 0xffff)
+#define  read_byte_mode(cpu,m,a)        (read_mem(cpu,m,a,1,0) & 0xff)
 
 
-#define  write_word(cpu,a,d)         write_mem(cpu,is_privileged(cpu),a,d,3)
-#define  write_halfword(cpu,a,d)     write_mem(cpu,is_privileged(cpu),a,(d)&0xffff,1)
-#define  write_byte(cpu,a,d)         write_mem(cpu,is_privileged(cpu),a,(d)&0xff,0)
+#define  write_word(cpu,a,d)            write_mem(cpu,is_privileged(cpu),a,d,3)
+#define  write_halfword(cpu,a,d)        write_mem(cpu,is_privileged(cpu),a,(d)&0xffff,1)
+#define  write_byte(cpu,a,d)            write_mem(cpu,is_privileged(cpu),a,(d)&0xff,0)
 
 #define  write_word_mode(cpu,m,a,d)         write_mem(cpu,m,a,d,3)
 #define  write_halfword_mode(cpu,m,a,d)     write_mem(cpu,m,a,(d)&0xffff,1)
