@@ -120,7 +120,6 @@ struct armv4_cpu_t {
         uint32_t reg[16];
         uint8_t mmu_fault;
     }mmu;
-#define  MMU_EXCEPTION_ADDR      0x4001f050
 
     struct peripheral_extern_t {
         uint32_t number;

@@ -176,7 +176,7 @@ static void exception_out(struct armv4_cpu_t *cpu)
 #define  cp15_ctl_v(mmu)  IS_SET(cp15_ctl(mmu), 13)
 
 
-uint32_t cp15_read(struct mmu_t *mmu, uint8_t op2, uint8_t CRn)
+static inline uint32_t cp15_read(struct mmu_t *mmu, uint8_t op2, uint8_t CRn)
 {
     if(!CRn && op2) {
         //Cache Type register
@@ -185,12 +185,12 @@ uint32_t cp15_read(struct mmu_t *mmu, uint8_t op2, uint8_t CRn)
     return mmu->reg[CRn];
 }
 
-void cp15_write(struct mmu_t *mmu, uint8_t op2, uint8_t CRn, uint32_t val)
+static inline void cp15_write(struct mmu_t *mmu, uint8_t op2, uint8_t CRn, uint32_t val)
 {
     mmu->reg[CRn] = val;
 }
 
-void cp15_reset(struct mmu_t *mmu)
+static inline void cp15_reset(struct mmu_t *mmu)
 {
     memset(mmu->reg, 0, sizeof(mmu->reg));
     mmu->reg[0] = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5; //Main ID register
@@ -241,7 +241,7 @@ static inline int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap,
  *  uint8_t privileged:   privileged: 1, user: 0
  * author:hxdyxd
  */
-static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
+static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr, uint8_t mask,
  uint8_t privileged, uint8_t wr)
 {
     struct mmu_t *mmu = &cpu->mmu;
@@ -249,59 +249,65 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
     if(!cp15_ctl_m(mmu)) {
         return vaddr;
     }
-    if(cp15_ctl_a(mmu)) {
+    if(cp15_ctl_a(mmu) && (vaddr&mask)) {
         //Check address alignment
-        
+        cp15_fsr(mmu) = 0x1;
+        cp15_far(mmu) = vaddr;
+        mmu->mmu_fault = 1;
+        PRINTF("address alignment fault va = 0x%x\n", vaddr);
+        return 0xffffffff;
     }
     //section page table, store size 16KB
     uint32_t page_table_entry = read_word_without_mmu(cpu,
      (cp15_ttb(mmu)&0xFFFFC000) | ((vaddr&0xFFF00000) >> 18));
+
+    uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
+    uint8_t domainval =  domain << 1;
+    domainval = (cp15_domain(mmu) >> domainval)&0x3;
+
     uint8_t first_level_descriptor = page_table_entry&3;
-    if(first_level_descriptor == 0) {
+    switch(first_level_descriptor) {
+    case 0:
         //Section translation fault
         cp15_fsr(mmu) = 0x5;
         cp15_far(mmu) = vaddr;
         mmu->mmu_fault = 1;
-        PRINTF("Section translation fault va = 0x%x\r\n", vaddr);
-        //exception_out();
-    } else if(first_level_descriptor == 2) {
+        PRINTF("Section translation fault va = 0x%x\n", vaddr);
+        break;
+    case 2:
         //section entry
-        uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
-        uint8_t domainval = domain << 1;
-        domainval = (cp15_domain(mmu) >> domainval)&0x3;
-        if(domainval == 0) {
+        switch(domainval) {
+        case 0:
             //Section domain fault
             cp15_fsr(mmu) = (domain << 4) | 0x9;
             cp15_far(mmu) = vaddr;
             mmu->mmu_fault = 1;
-            WARN("Section domain fault\r\n");
-            //getchar();
-        } else if(domainval == 1) {
-            //Client, Check access permissions
-            uint8_t ap = (page_table_entry>>10)&0x3;
-            if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
-                return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
-            } else {
+            PRINTF("Section domain fault\n");
+            break;
+        case 1:
+            do {
+                //Client, Check access permissions
+                uint8_t ap = (page_table_entry>>10)&0x3;
+                if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0)
+                    return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
                 //Section permission fault
                 cp15_fsr(mmu) = (domain << 4) | 0xd;
                 cp15_far(mmu) = vaddr;
                 mmu->mmu_fault = 1;
-                WARN("Section permission fault\r\n");
-                //getchar();
-            }
-        } else if(domainval == 3) {
+                PRINTF("Section permission fault\n");
+            }while(0);
+            break;
+        case 3:
             //Manager
             return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
-        } else {
-            WARN("mmu fault\r\n");
+        default:
+            WARN("mmu fault\n");
             exception_out(cpu);
+            break;
         }
-        
-    } else {
+        break;
+    default:
         //page table
-        uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
-        uint8_t domainval =  domain << 1;
-        domainval = (cp15_domain(mmu) >> domainval)&0x3;
         if(first_level_descriptor == 1) {
             //coarse page table, store size 1KB
             page_table_entry = read_word_without_mmu(cpu,
@@ -310,9 +316,6 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
             //fine page table, store size 4KB
             page_table_entry = read_word_without_mmu(cpu,
              (page_table_entry&0xFFFFF000)|((vaddr&0x000FFC00) >> 8));
-        } else {
-            WARN("mmu fault\r\n");
-            exception_out(cpu);
         }
         uint8_t second_level_descriptor = page_table_entry&3;
         if(second_level_descriptor == 0) {
@@ -320,75 +323,54 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
             cp15_fsr(mmu) = (domain << 4) | 0x7;
             cp15_far(mmu) = vaddr;
             mmu->mmu_fault = 1;
-            PRINTF("Page translation fault va = 0x%x %d %d pte = 0x%x\r\n",
+            PRINTF("Page translation fault va = 0x%x %d %d pte = 0x%x\n",
              vaddr, privileged, wr, page_table_entry);
-            //exception_out(cpu);
         } else {
-            if(domainval == 0) {
+            switch(domainval) {
+            case 0:
                 //Page domain fault
                 cp15_fsr(mmu) = (domain << 4) | 0xb;
                 cp15_far(mmu) = vaddr;
                 mmu->mmu_fault = 1;
-                WARN("Page domain fault\r\n");
-                //getchar();
-            } else if(domainval == 1) {
+                WARN("Page domain fault\n");
+                break;
+            case 1:
                 //Client, Check access permissions
-                uint8_t ap;
                 switch(second_level_descriptor) {
                 case 1:
-                {
+                    do {
+                        //large page, 64KB
+                        uint8_t subpage = (vaddr >> 14)&3;
+                        uint8_t ap = (page_table_entry >> ((subpage<<1)+4))&0x3;
+                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0)
+                            return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+                    }while(0);
                     break;
-                    //large page, 64KB
-                    uint8_t subpage = (vaddr >> 14)&3;
-                    subpage <<= 1;
-                    ap = (page_table_entry >> (subpage+4))&0x3;
-                    if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
-                        return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
-                    } else {
-                        //Sub-page permission fault
-                        cp15_fsr(mmu) = (domain << 4) | 0xf;
-                        cp15_far(mmu) = vaddr;
-                        mmu->mmu_fault = 1;
-                        PRINTF("Large Sub-page permission fault va = 0x%x %d %d %d\r\n",
-                         vaddr, ap, privileged, wr);
-                        //exception_out(cpu);
-                    }
-                }
                 case 2:
-                {
-                    //small page, 4KB
-                    uint8_t subpage = (vaddr >> 10)&3;
-                    subpage <<= 1;
-                    ap = (page_table_entry >> (subpage+4))&0x3;
-                    if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
-                        return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
-                    } else {
-                        //Sub-page permission fault
-                        cp15_fsr(mmu) = (domain << 4) | 0xf;
-                        cp15_far(mmu) = vaddr;
-                        mmu->mmu_fault = 1;
-                        PRINTF("Small Sub-page permission fault va = 0x%x %d %d %d\r\n",
-                         vaddr, ap, privileged, wr);
-                        //exception_out(cpu);
-                    }
-                }
+                    do {
+                        //small page, 4KB
+                        uint8_t subpage = (vaddr >> 10)&3;
+                        uint8_t ap = (page_table_entry >> ((subpage<<1)+4))&0x3;
+                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0)
+                            return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+                    }while(0);
+                    break;
                 case 3:
-                    //tiny page, 1KB
-                    ap = (page_table_entry>>4)&0x3; //ap0
-                    if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
-                        return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
-                    } else {
-                        //Sub-page permission fault
-                        cp15_fsr(mmu) = (domain << 4) | 0xf;
-                        cp15_far(mmu) = vaddr;
-                        mmu->mmu_fault = 1;
-                        PRINTF("Tiny Sub-page permission fault va = 0x%x %d %d %d\r\n",
-                         vaddr, ap, privileged, wr);
-                        //exception_out(cpu);
-                    }
+                    do {
+                        //tiny page, 1KB
+                        uint8_t ap = (page_table_entry>>4)&0x3; //ap0
+                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0)
+                            return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
+                    }while(0);
+                    break;
                 }
-                
-            } else if(domainval == 3) {
+                //Sub-page permission fault
+                cp15_fsr(mmu) = (domain << 4) | 0xf;
+                cp15_far(mmu) = vaddr;
+                mmu->mmu_fault = 1;
+                PRINTF("Sub-page permission fault va = 0x%x %d %d\n", vaddr, privileged, wr);
+                break;
+            case 3:
                 //Manager
                 switch(second_level_descriptor) {
                 case 1:
@@ -401,13 +383,16 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
                     //tiny page, 1KB
                     return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
                 }
-            } else {
-                printf("mmu fault\r\n");
+                break;
+            default:
+                printf("mmu fault\n");
                 exception_out(cpu);
-            }
-        }
+                break;
+            } /* end switch(domainval) */
+        } /* end if(second_level_descriptor == 0) */
+        break;
     }
-    return MMU_EXCEPTION_ADDR;
+    return 0xffffffff;
 }
 
 /****cp15 end***********************************************************/
@@ -419,14 +404,10 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
 uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
  uint8_t mmu, uint8_t mask)
 {
-    if(address&mask) {
-        //Check address alignment
-        WARN("memory address alignment error 0x%x\n", address);
-        exception_out(cpu);
-    }
-    
     if(mmu) {
-        address = mmu_transfer(cpu, address, privileged, 0); //read
+        address = mmu_transfer(cpu, address, mask, privileged, 0); //read
+        if(mmu_check_status(&cpu->mmu))
+            return 0xffffffff;
     }
     
     //1M Peripheral memory
@@ -440,8 +421,6 @@ uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
     if(address == 0x4001f030) {
         //code counter
         return cpu->code_counter;
-    } else if(address == MMU_EXCEPTION_ADDR) {
-        return 0xffffffff;
     }
     
     WARN("mem overflow error, read 0x%x\r\n", address);
@@ -457,13 +436,9 @@ uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
 void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
  uint32_t data,  uint8_t mask)
 {
-    if(address&mask) {
-        //Check address alignment
-        WARN("memory address alignment error 0x%x\n", address);
-        exception_out(cpu);
-    }
-    
-    address = mmu_transfer(cpu, address, privileged, 1); //write
+    address = mmu_transfer(cpu, address, mask, privileged, 1); //write
+    if(mmu_check_status(&cpu->mmu))
+        return;
     
     //4G Peripheral memory
     for(int i=0; i<cpu->peripheral.number; i++) {
@@ -476,8 +451,6 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
     if(address == 0x4001f030) {
         //ips
         cpu->code_counter = data;
-        return;
-    } else if(address == MMU_EXCEPTION_ADDR) {
         return;
     }
 

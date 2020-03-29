@@ -25,6 +25,7 @@
 #include <kfifo.h>
 
 #include <pthread.h>
+#include <sys/prctl.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -42,10 +43,16 @@ int tun_out_task_start(void);
 
 #define BUF_SIZE      (1800)
 #define FIFO_SIZE     (2048)
-struct __kfifo send_fifo;
-uint8_t send_fifo_buffer[FIFO_SIZE];
-struct __kfifo recv_fifo;
-uint8_t recv_fifo_buffer[FIFO_SIZE];
+static struct __kfifo send_fifo;
+static uint8_t send_fifo_buffer[FIFO_SIZE];
+static struct __kfifo recv_fifo;
+static uint8_t recv_fifo_buffer[FIFO_SIZE];
+
+#ifdef TUN_MUTEX_MODE
+static pthread_mutex_t send_mut;
+static pthread_mutex_t recv_mut;
+#endif
+
 
 static inline unsigned int slip_kfifo_unused(struct __kfifo *fifo)
 {
@@ -57,6 +64,10 @@ int slip_tun_init(void)
 {
     __kfifo_init(&send_fifo, send_fifo_buffer, FIFO_SIZE, 1);
     __kfifo_init(&recv_fifo, recv_fifo_buffer, FIFO_SIZE, 1);
+#ifdef TUN_MUTEX_MODE
+    pthread_mutex_init(&send_mut, NULL);
+    pthread_mutex_init(&recv_mut, NULL);
+#endif
 
     if(tun_out_task_start() < 0) {
         return 0;
@@ -75,6 +86,9 @@ int slip_tun_read(void)
 {
     uint8_t ch;
     __kfifo_out(&send_fifo, &ch, 1);
+#ifdef TUN_MUTEX_MODE
+    pthread_mutex_unlock(&send_mut);
+#endif
     return ch;
 }
 
@@ -91,6 +105,9 @@ int slip_tun_writeable(void)
 int slip_tun_write(int ch)
 {
     __kfifo_in(&recv_fifo, &ch, 1);
+#ifdef TUN_MUTEX_MODE
+    pthread_mutex_unlock(&recv_mut);
+#endif
     return 0;
 }
 
@@ -104,7 +121,11 @@ static volatile uint8_t tun_out_task_run_flag = 0;
 void send_char(int ch)
 {
     while(__kfifo_in(&send_fifo, &ch, 1) == 0 && tun_out_task_run_flag) {
+#ifdef TUN_MUTEX_MODE
+        pthread_mutex_lock(&send_mut);
+#else
         usleep(20);
+#endif
     }
 }
 
@@ -119,7 +140,11 @@ int recv_char(void)
 {
     uint8_t ch;
     while(__kfifo_out(&recv_fifo, &ch, 1) == 0 && slip_out_task_run_flag) {
+#ifdef TUN_MUTEX_MODE
+        pthread_mutex_lock(&recv_mut);
+#else
         usleep(20);
+#endif
     }
     return ch;
 }
@@ -138,12 +163,13 @@ int if_api_check(void *buf, int len);
 static pthread_t gs_slip_out_task_pthread_id;
 static pthread_t gs_tun_out_task_pthread_id;
 
-unsigned char tun_out_buffer[BUF_SIZE];
-unsigned char slip_out_buffer[BUF_SIZE];
+static unsigned char tun_out_buffer[BUF_SIZE];
+static unsigned char slip_out_buffer[BUF_SIZE];
 
 void *slip_out_task_proc(void *par)
 {
     int tun_fd = *(int *)par;
+    prctl(PR_SET_NAME,"slip_out_task");
     DEBUG_PRINTF("slip out task enter success %d!\n", tun_fd);
     while(slip_out_task_run_flag) {
         int total_len = recv_packet(slip_out_buffer, BUF_SIZE);
@@ -195,6 +221,7 @@ int slip_out_task_stop(void)
 void *tun_out_task_proc(void *par)
 {
     int tun_fd = *(int *)par;
+    prctl(PR_SET_NAME,"tun_out_task");
     DEBUG_PRINTF("tun out task enter success %d!\n", tun_fd);
     while(tun_out_task_run_flag) {
         int total_len = read(tun_fd, tun_out_buffer, BUF_SIZE-2);
@@ -222,7 +249,7 @@ void *tun_out_task_proc(void *par)
     return NULL;
 }
 
-int tun_fd;
+static int tun_fd;
 int tun_out_task_start(void)
 {
     DEBUG_PRINTF("open TUN/TAP device\n" );
