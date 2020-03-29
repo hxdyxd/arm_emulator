@@ -729,9 +729,12 @@ static uint8_t shifter(struct armv4_cpu_t *cpu, uint32_t *op, const uint8_t rot_
 
 
 #define ALU_MODE_ADD     (1)
-#define ALU_MODE_SUB     (2)
+#define ALU_MODE_SUB     (0)
 
-static uint32_t adder(const uint32_t op1, const uint32_t op2, const uint32_t carry,
+#define adder(op1,op2,m)  ((m==ALU_MODE_ADD)?(op1)+(op2):(op1)-(op2))
+
+
+static uint32_t adder_with_carry(const uint32_t op1, const uint32_t op2, const uint32_t carry,
  const uint8_t add_mode, uint8_t *bit_cy, uint8_t *bit_ov)
 {
     uint32_t sum_middle = 0, cy_high_bits = 0;
@@ -756,6 +759,7 @@ static uint32_t adder(const uint32_t op1, const uint32_t op2, const uint32_t car
     PRINTF("[ALU]op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ", op1, op2, carry, aluout);
     return aluout;
 }
+
 
 
 //**************************************************
@@ -1214,6 +1218,7 @@ static void code_debug(const union ins_t ins, const uint8_t code_type)
 }
 
 
+
 static inline uint32_t code_shifter(struct armv4_cpu_t *cpu, const union ins_t ins, uint8_t code_type, uint8_t *carry)
 {
     uint32_t operand2 = register_read(cpu, Rm); //3_0;
@@ -1248,135 +1253,503 @@ static inline uint32_t code_shifter(struct armv4_cpu_t *cpu, const union ins_t i
     case code_type_ldrsh1:
         operand2 = immediate_extldr; //8bit
         break;
-    case code_type_ldrh0:
-    case code_type_ldrsb0:
-    case code_type_ldrsh0:
-    case code_type_bx:
-    case code_type_msr0:
-    case code_type_multl:
-        break;
-    case code_type_mrs:
-    case code_type_ldm:
-    case code_type_swp:
-    case code_type_mcr:
-        break;
     case code_type_b:
         operand2 = immediate_b;
         break;
-    case code_type_mult:
-        operand2 *= register_read(cpu, Rs);
-        break;
-
-    case code_type_swi:
-        cpu->decoder.event_id = EVENT_ID_SWI;
-        break;
-    default:
-        cpu->decoder.event_id = EVENT_ID_UNDEF;
     }
     *carry = shifter_carry_out;
     return operand2;
 }
 
 
-static inline uint32_t code_alu(struct armv4_cpu_t *cpu, const union ins_t ins, uint8_t code_type,
- uint32_t operand1, uint32_t operand2, uint8_t *carry_out, uint8_t *bit_ov)
+static void code_dp(struct armv4_cpu_t *cpu, const union ins_t ins, uint32_t operand1, uint32_t operand2, uint8_t carry_out)
 {
     uint8_t carry_in = 0;
     uint32_t aluout = 0;
-
-    switch(code_type) {
-    case code_type_dp0:
-    case code_type_dp1:
-    case code_type_dp2:
-        switch(opcode) {
-        case 5:
-            //ADC
-            carry_in = cpsr_c(cpu);
-        case 4:
-        case 11:
-            //ADD, CMN
-            aluout = adder(operand1, operand2, carry_in, ALU_MODE_ADD, carry_out, bit_ov);
-            break;
-
-        case 3:
-            //RSB
-            SWAP_VAL(operand1, operand2);
-            aluout = adder(operand1, operand2, carry_in, ALU_MODE_SUB, carry_out, bit_ov);
-            break;
-        case 7:
-            //RSC
-            SWAP_VAL(operand1, operand2);
-        case 6:
-            //SBC
-            carry_in = !cpsr_c(cpu);
-        case 2:
-        case 10:
-            //SUB, CMP
-            aluout = adder(operand1, operand2, carry_in, ALU_MODE_SUB, carry_out, bit_ov);
-            break;
-
-        case 0:
-        case 8:
-            //AND, TST
-            aluout = operand1 & operand2;
-            break;
-        case 1:
-        case 9:
-            //EOR, TEQ
-            aluout = operand1 ^ operand2;
-            break;
-        case 12:
-            //ORR
-            aluout = operand1 | operand2;
-            break;
-        case 13:
-            //MOV
-            aluout = operand2;
-            break;
-        case 14:
-            //BIC
-            aluout = operand1 & (~operand2);
-            break;
-        case 15:
-            //MVN
-            aluout = ~operand2;
-            break;
-        }
-        break;
-    case code_type_ldr0:
-    case code_type_ldr1:
-    case code_type_ldrsb1:
-    case code_type_ldrsh1:
-    case code_type_ldrh1:
-    case code_type_ldrsb0:
-    case code_type_ldrsh0:
-    case code_type_ldrh0:
-        aluout = adder(operand1, operand2, carry_in, Uf?ALU_MODE_ADD:ALU_MODE_SUB, carry_out, bit_ov);
-        break;
-    case code_type_b:
-        operand1 = register_read(cpu, 15);
-        aluout = adder(operand1, operand2, carry_in, ALU_MODE_ADD, carry_out, bit_ov);
-        break;
-    case code_type_mult:
-        //Rd and Rn swap, !!!
-        operand1 = opcode?register_read(cpu, Rd):0; //MLA
-        aluout = adder(operand1, operand2, carry_in, ALU_MODE_ADD, carry_out, bit_ov);
+    uint8_t bit_ov = cpsr_v(cpu);
+    switch(opcode) {
+    case 5:
+        //ADC
+        carry_in = cpsr_c(cpu);
+    case 4:
+    case 11:
+        //ADD, CMN
+        aluout = adder_with_carry(operand1, operand2, carry_in, ALU_MODE_ADD, &carry_out, &bit_ov);
         break;
 
-    case code_type_bx:
-    case code_type_msr0:
-    case code_type_msr1:
+    case 3:
+        //RSB
+        SWAP_VAL(operand1, operand2);
+        aluout = adder_with_carry(operand1, operand2, carry_in, ALU_MODE_SUB, &carry_out, &bit_ov);
+        break;
+    case 7:
+        //RSC
+        SWAP_VAL(operand1, operand2);
+    case 6:
+        //SBC
+        carry_in = !cpsr_c(cpu);
+    case 2:
+    case 10:
+        //SUB, CMP
+        aluout = adder_with_carry(operand1, operand2, carry_in, ALU_MODE_SUB, &carry_out, &bit_ov);
+        break;
+
+    case 0:
+    case 8:
+        //AND, TST
+        aluout = operand1 & operand2;
+        break;
+    case 1:
+    case 9:
+        //EOR, TEQ
+        aluout = operand1 ^ operand2;
+        break;
+    case 12:
+        //ORR
+        aluout = operand1 | operand2;
+        break;
+    case 13:
+        //MOV
         aluout = operand2;
         break;
-    case code_type_ldm:
-    case code_type_mrs:
-    case code_type_swp:
-    case code_type_swi:
-    case code_type_mcr:
-    case code_type_multl:
+    case 14:
+        //BIC
+        aluout = operand1 & (~operand2);
+        break;
+    case 15:
+        //MVN
+        aluout = ~operand2;
         break;
     }
-    return aluout;
+
+    if(Bit24_23 == 2) {
+        PRINTF("update flag only \r\n");
+    } else {
+        register_write(cpu, Rd, aluout);
+        PRINTF("write register R%d = 0x%x\r\n", Rd, aluout);
+    }
+    if(Bit20) {
+        //Update CPSR register
+        uint8_t out_sign = IS_SET(aluout, 31);
+        
+        cpsr_n_set(cpu, out_sign);
+        cpsr_z_set(cpu, aluout == 0);
+        cpsr_c_set(cpu, carry_out );
+        cpsr_v_set(cpu, bit_ov );
+        
+        PRINTF("[DP] update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
+        
+        if(Rd == 15 && Bit24_23 != 2) {
+            uint8_t cpu_mode = get_cpu_mode_code(cpu);
+            cpsr(cpu) = cpu->spsr[cpu_mode];
+            PRINTF("[DP] cpsr 0x%x copy from spsr %d \r\n", cpsr(cpu), cpu_mode);
+        }
+    }
+}
+
+
+static void code_b(struct armv4_cpu_t *cpu, const union ins_t ins, uint32_t operand1, uint32_t operand2)
+{
+    uint32_t aluout = 0;
+    uint8_t lf = 0;
+    switch(cpu->decoder.code_type) {
+    case code_type_b:
+        aluout = adder(operand1, operand2, ALU_MODE_ADD);
+        lf = Lf_b;
+        break;
+    case code_type_bx:
+        aluout = operand2;
+        lf = Lf_bx;
+        break;
+    }
+
+    if(lf) {
+        register_write(cpu, 14, register_read(cpu, 15) - 4);  //LR register
+        PRINTF("write register R%d = 0x%0x, ", 14, register_read(cpu, 14));
+    }
+    
+    if(aluout&3) {
+        ERROR("thumb unsupport \r\n");
+    }
+    register_write(cpu, 15, aluout & 0xfffffffc);  //PC register
+    PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
+}
+
+
+static void code_ldr(struct armv4_cpu_t *cpu, const union ins_t ins, uint32_t operand1, uint32_t operand2)
+{
+    uint32_t aluout = adder(operand1, operand2, Uf?ALU_MODE_ADD:ALU_MODE_SUB);
+    uint8_t code_type = cpu->decoder.code_type;
+
+    uint32_t address = operand1;  //memory address
+    uint32_t data;
+    if(Pf) {
+        address = aluout;
+    }
+    
+    uint32_t tmpcpsr = cpsr(cpu);
+    uint8_t ldrt = 0;
+    if(!Pf && Wf && (code_type == code_type_ldr0 || code_type == code_type_ldr1) ) {
+        //LDRT as user mode
+        cpsr(cpu) &= 0x1f;
+        cpsr(cpu) |= CPSR_M_USR;
+        ldrt = 1;
+    }
+    
+    if(Lf) {
+        //LDR
+        switch(code_type) {
+        case code_type_ldrh1:
+        case code_type_ldrh0:
+            //Halfword
+            data = read_halfword(cpu, address);
+            break;
+        case code_type_ldrsh1:
+        case code_type_ldrsh0:
+            //Halfword Signed
+            data = read_halfword(cpu, address);
+            if(data&0x8000) {
+                data |= 0xffff0000;
+            }
+            break;
+        case code_type_ldrsb1:
+        case code_type_ldrsb0:
+            //Byte Signed
+            data = read_byte(cpu, address);
+            if(data&0x80) {
+                data |= 0xffffff00;
+            }
+            break;
+        default:
+            data = Bf?read_byte(cpu, address):read_word(cpu, address);
+        }
+        
+        if(mmu_check_status(&cpu->mmu)) {
+            if(ldrt) {
+                //LDRT restore cpsr
+                cpsr(cpu) = tmpcpsr;
+            }
+            cpu->decoder.event_id = EVENT_ID_DATAABT;
+            return;
+        }
+        register_write(cpu, Rd, data);
+        PRINTF("load data [0x%x]:0x%x to R%d \r\n", address, register_read(cpu, Rd), Rd);
+    } else {
+        //STR
+        data = register_read(cpu, Rd);
+        switch(code_type) {
+        case code_type_ldrh1:
+        case code_type_ldrh0:
+            //Halfword
+            write_halfword(cpu, address, data);
+            break;
+        case code_type_ldrsh1:
+        case code_type_ldrsh0:
+            //Halfword Signed ?
+            write_halfword(cpu, address, data);
+            printf("STRSH ? \r\n");
+            exception_out(cpu);
+            break;
+        case code_type_ldrsb1:
+        case code_type_ldrsb0:
+            //Byte Signed ?
+            write_byte(cpu, address, data);
+            printf("STRSB ? \r\n");
+            exception_out(cpu);
+            break;
+        default:
+            if(Bf) {
+                write_byte(cpu, address, data);
+            } else {
+                write_word(cpu, address, data);
+            }
+        }
+
+        if(mmu_check_status(&cpu->mmu)) {
+            if(ldrt) {
+                //LDRT restore cpsr
+                cpsr(cpu) = tmpcpsr;
+            }
+            cpu->decoder.event_id = EVENT_ID_DATAABT;
+            return;
+        }
+        PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd, data, address);
+    }
+    if(!(!Wf && Pf)) {
+        //Update base register
+        register_write(cpu, Rn, aluout);
+        PRINTF("[LDR]write register R%d = 0x%x\r\n", Rn, aluout);
+    }
+    
+    if(ldrt) {
+        //LDRT restore cpsr
+        cpsr(cpu) = tmpcpsr;
+    }
+}
+
+
+static void code_ldm(struct armv4_cpu_t *cpu, const union ins_t ins, uint32_t operand1)
+{
+    if(Lf) { //bit [20]
+        //LDM
+        uint8_t ldm_type = 0;
+        if(Bit22 && !IS_SET(ins.word, 15)) {
+            //LDM(2)
+            ldm_type = 1;
+        }
+        
+        uint8_t pc_include_flag = 0;
+        uint32_t address = operand1;
+        for(int i=0; i<16; i++) {
+            int n = (Uf)?i:(15-i);
+            if(IS_SET(ins.word, n)) {
+                if(Pf) {
+                    if(Uf) address += 4;
+                    else address -= 4;
+                }
+                uint32_t data = read_word(cpu, address);
+                if(mmu_check_status(&cpu->mmu)) {
+                    cpu->decoder.event_id = EVENT_ID_DATAABT;
+                    return;
+                }
+                if(n == 15) {
+                    data &= 0xfffffffc;
+                    if(Bit22) {
+                        pc_include_flag = 1;
+                    }
+                }
+                if(ldm_type) {
+                    //LDM(2)
+                    register_write_user_mode(cpu, n, data);
+                } else {
+                    //LDM(1)
+                    register_write(cpu, n, data);
+                }
+                
+                PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, data, n);
+                if(!Pf) {
+                    if(Uf) address += 4;
+                    else address -= 4;
+                }
+            }
+        }
+        
+        if(Wf) {  //bit[21] W
+            register_write(cpu, Rn, address);
+            PRINTF("[LDM] write R%d = 0x%0x \r\n", Rn, address);
+        }
+        
+        if(pc_include_flag) {
+            //LDM(3) copy spsr to cpsr
+            uint8_t cpu_mode = get_cpu_mode_code(cpu);
+            cpsr(cpu) = cpu->spsr[cpu_mode];
+            PRINTF("ldm(3) cpsr 0x%x copy from spsr %d\r\n", cpsr(cpu), cpu_mode);
+        }
+        
+    } else {
+        uint8_t stm_type = 0;
+        if(Bit22) {
+            //STM(2)
+            stm_type = 1;
+        }
+        //STM
+        uint32_t address = operand1;
+        for(int i=0; i<16; i++) {
+            int n = (Uf)?i:(15-i);
+            if(IS_SET(ins.word, n)) {
+                if(Pf) {
+                    if(Uf) address += 4;
+                    else address -= 4;
+                }
+                if(stm_type) {
+                    //STM(2)
+                    write_word(cpu, address, register_read_user_mode(cpu, n));
+                } else {
+                    //STM(1)
+                    write_word(cpu, address, register_read(cpu, n));
+                }
+                
+                PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", n, register_read(cpu, n), address);
+                if(mmu_check_status(&cpu->mmu)) {
+                    cpu->decoder.event_id = EVENT_ID_DATAABT;
+                    return;
+                }
+                
+                if(!Pf) {
+                    if(Uf) address += 4;
+                    else address -= 4;
+                }
+            }
+        }
+        
+        if(Wf) {  //bit[21] W
+            register_write(cpu, Rn, address);
+            PRINTF("[STM] write R%d = 0x%0x \r\n", Rn, address);
+        }
+    }
+}
+
+
+static void code_msr(struct armv4_cpu_t *cpu, const union ins_t ins, uint32_t operand2)
+{
+    if(cpu->decoder.code_type == code_type_mrs) {
+        if(Bit22) {
+            uint8_t mode = get_cpu_mode_code(cpu);
+            register_write(cpu, Rd, cpu->spsr[mode]);
+            PRINTF("write register R%d = [spsr]0x%x\r\n", Rd, cpu->spsr[mode]);
+        } else {
+            register_write(cpu, Rd, cpsr(cpu));
+            PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr(cpu));
+        }
+    } else {
+        uint32_t aluout = operand2;
+        uint8_t cpu_mode;
+        if(Bit22) {
+            //write spsr
+            cpu_mode = get_cpu_mode_code(cpu);
+            if(cpu_mode == 0) {
+                printf("[MSR] user mode has not spsr\r\n");
+                exception_out(cpu);
+            }
+        } else {
+            //write cpsr
+            cpu_mode = 0;
+            if(cpsr_m(cpu) == CPSR_M_USR && (Rn&0x7) ) {
+                printf("[MSR] cpu is user mode, flags field can write only\r\n");
+                exception_out(cpu);
+            }
+        } 
+        if(IS_SET(Rn, 0) ) {
+            cpu->spsr[cpu_mode] &= 0xffffff00;
+            cpu->spsr[cpu_mode] |= aluout&0xff;
+        }
+        if(IS_SET(Rn, 1) ) {
+            cpu->spsr[cpu_mode] &= 0xffff00ff;
+            cpu->spsr[cpu_mode] |= aluout&0xff00;
+        }
+        if(IS_SET(Rn, 2) ) {
+            cpu->spsr[cpu_mode] &= 0xff00ffff;
+            cpu->spsr[cpu_mode] |= aluout&0xff0000;
+        }
+        if(IS_SET(Rn, 3) ) {
+            cpu->spsr[cpu_mode] &= 0x00ffffff;
+            cpu->spsr[cpu_mode] |= aluout&0xff000000;
+        }
+        PRINTF("write register spsr_%d = 0x%x\r\n", cpu_mode, cpu->spsr[cpu_mode]);
+    }
+}
+
+
+static void code_mcr(struct armv4_cpu_t *cpu, const union ins_t ins)
+{
+    //  cp_num       Rs
+    //  register     Rd
+    //  cp_register  Rn
+    if(Bit20) {
+        //mrc
+        if(ins.mcr.cp_num == 15) {
+            uint32_t cp15_val = cp15_read(&cpu->mmu, ins.mcr.opcode2, ins.mcr.CRn);
+            register_write(cpu, Rd, cp15_val);
+            PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, ins.mcr.CRn, cp15_val, ins.mcr.opcode2, Rd);
+        } else {
+            ERROR("read unsupported cp%d_c%d \r\n", Rs, ins.mcr.CRn);
+        }
+    } else {
+        //mcr
+        uint32_t register_val = register_read(cpu, Rd);
+        if(ins.mcr.cp_num == 15) {
+            cp15_write(&cpu->mmu, ins.mcr.opcode2, ins.mcr.CRn, register_val);
+            PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, ins.mcr.cp_num, ins.mcr.CRn);
+        } else {
+            ERROR("write unsupported cp%d_c%d \r\n", Rs, ins.mcr.CRn);
+        }
+    }
+}
+
+
+static void code_mult(struct armv4_cpu_t *cpu, const union ins_t ins, uint32_t operand1, uint32_t operand2)
+{
+    uint32_t aluout = adder(operand1, operand2, ALU_MODE_ADD);
+
+    register_write(cpu, Rn, aluout);   //Rd and Rn swap, !!!
+    PRINTF("[MULT] write register R%d = 0x%x\r\n", Rn, aluout);
+    
+    if(Bit20) {
+        //Update CPSR register
+        uint8_t out_sign = IS_SET(aluout, 31);
+        
+        cpsr_n_set(cpu, out_sign);
+        cpsr_z_set(cpu, aluout == 0);
+        //cv unaffected
+        PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
+    }
+}
+
+
+static void code_multl(struct armv4_cpu_t *cpu, const union ins_t ins, uint32_t operand1, uint32_t operand2)
+{
+    uint64_t multl_long = 0;
+    uint8_t negative = 0;
+    uint32_t rs_num = operand2;
+    uint32_t rm_num = register_read(cpu, Rs);
+    if(Bit22) {
+        //Signed
+        if(IS_SET(rm_num, 31)) {
+            rm_num = ~rm_num + 1;
+            negative++;
+        }
+        
+        if(IS_SET(rs_num, 31)) {
+            rs_num = ~rs_num + 1;
+            negative++;
+        }
+    }
+    
+    multl_long = (uint64_t)rm_num * rs_num;
+    if( negative == 1 ) {
+        //Set negative sign
+        multl_long = ~(multl_long - 1);
+    }
+    
+    if(opcode&1) {
+        multl_long += ( ((uint64_t)operand1 << 32) | register_read(cpu, Rd));
+    }
+    
+    register_write(cpu, Rn, multl_long >> 32);
+    register_write(cpu, Rd, multl_long&0xffffffff);
+    PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n",
+    register_read(cpu, Rn), Rn, register_read(cpu, Rd), Rd, rm_num, rs_num);
+    
+    if(Bit20) {
+        //Update CPSR register
+        uint8_t out_sign = IS_SET(multl_long, 63);
+        
+        cpsr_n_set(cpu, out_sign);
+        cpsr_z_set(cpu, multl_long == 0);
+        //cv unaffecteds
+        PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
+    }
+}
+
+
+static void code_swp(struct armv4_cpu_t *cpu, const union ins_t ins, uint32_t operand1, uint32_t operand2)
+{
+    /* op1, Rn
+     * op2, Rm
+     */
+    if(Bf) {
+        //SWPB 4.1.52 todo...
+        ERROR("swpb\n");
+    } else {
+        //SWP
+        uint32_t aluout = read_word(cpu, operand1);
+        if(mmu_check_status(&cpu->mmu)) {
+            cpu->decoder.event_id = EVENT_ID_DATAABT;
+            return;
+        }
+        write_word(cpu, operand1, operand2);
+        register_write(cpu, Rd, aluout);
+    }
 }
 
 
@@ -1446,78 +1819,29 @@ void decode(struct armv4_cpu_t *cpu)
         return;
     }
 
-    uint8_t code_type = code_decoder(ins);
+    dec->code_type = code_decoder(ins);
     if(DEBUG)
-        code_debug(ins, code_type);
+        code_debug(ins, dec->code_type);
+
 
     //----------------------------------------------------------------------------------------------------------
     //----------------------------------------------------------------------------------------------------------
     //execute
     uint8_t carry_out = cpsr_c(cpu);
-    uint8_t bit_ov = cpsr_v(cpu);
+
     uint32_t operand1 = register_read(cpu, Rn); //19_16
-    uint32_t operand2 = code_shifter(cpu, ins, code_type, &carry_out);
-    uint32_t aluout = code_alu(cpu, ins, code_type, operand1, operand2, &carry_out, &bit_ov);
-
-
-    switch(code_type) {
+    uint32_t operand2 = code_shifter(cpu, ins, dec->code_type, &carry_out);
+    
+    switch(dec->code_type) {
     case code_type_dp0:
     case code_type_dp1:
     case code_type_dp2:
-        if(Bit24_23 == 2) {
-            PRINTF("update flag only \r\n");
-        } else {
-            register_write(cpu, Rd, aluout);
-            PRINTF("write register R%d = 0x%x\r\n", Rd, aluout);
-        }
-        if(Bit20) {
-            //Update CPSR register
-            uint8_t out_sign = IS_SET(aluout, 31);
-            
-            cpsr_n_set(cpu, out_sign);
-            cpsr_z_set(cpu, aluout == 0);
-            cpsr_c_set(cpu, carry_out );
-            cpsr_v_set(cpu, bit_ov );
-            
-            PRINTF("[DP] update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
-            
-            if(Rd == 15 && Bit24_23 != 2) {
-                uint8_t cpu_mode = get_cpu_mode_code(cpu);
-                cpsr(cpu) = cpu->spsr[cpu_mode];
-                PRINTF("[DP] cpsr 0x%x copy from spsr %d \r\n", cpsr(cpu), cpu_mode);
-            }
-        }
+        code_dp(cpu, ins, operand1, operand2, carry_out);
         break;
     case code_type_bx:
     case code_type_b:
-        if((code_type == code_type_bx)?Lf_bx:Lf_b) {
-            register_write(cpu, 14, register_read(cpu, 15) - 4);  //LR register
-            PRINTF("write register R%d = 0x%0x, ", 14, register_read(cpu, 14));
-        }
-        
-        if(aluout&3) {
-            ERROR("thumb unsupport \r\n");
-        }
-        register_write(cpu, 15, aluout & 0xfffffffc);  //PC register
-        PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
-        break;
-    case code_type_swp:
-        /* op1, Rn
-         * op2, Rm
-         */
-        if(Bf) {
-            //SWPB 4.1.52 todo...
-            ERROR("swpb\n");
-        } else {
-            //SWP
-            uint32_t aluout = read_word(cpu, operand1);
-            if(mmu_check_status(&cpu->mmu)) {
-                cpu->decoder.event_id = EVENT_ID_DATAABT;
-                return;
-            }
-            write_word(cpu, operand1, operand2);
-            register_write(cpu, Rd, aluout);
-        }
+        operand1 = register_read(cpu, 15);
+        code_b(cpu, ins, operand1, operand2);
         break;
     case code_type_ldr0:
     case code_type_ldr1:
@@ -1527,348 +1851,38 @@ void decode(struct armv4_cpu_t *cpu)
     case code_type_ldrsb0:
     case code_type_ldrsh0:
     case code_type_ldrh0:
-    {
-        uint32_t address = operand1;  //memory address
-        uint32_t data;
-        if(Pf) {
-            address = aluout;
-        }
-        
-        uint32_t tmpcpsr = cpsr(cpu);
-        uint8_t ldrt = 0;
-        if(!Pf && Wf && (code_type == code_type_ldr0 || code_type == code_type_ldr1) ) {
-            //LDRT as user mode
-            cpsr(cpu) &= 0x1f;
-            cpsr(cpu) |= CPSR_M_USR;
-            ldrt = 1;
-        }
-        
-        if(Lf) {
-            //LDR
-            switch(code_type) {
-            case code_type_ldrh1:
-            case code_type_ldrh0:
-                //Halfword
-                data = read_halfword(cpu, address);
-                break;
-            case code_type_ldrsh1:
-            case code_type_ldrsh0:
-                //Halfword Signed
-                data = read_halfword(cpu, address);
-                if(data&0x8000) {
-                    data |= 0xffff0000;
-                }
-                break;
-            case code_type_ldrsb1:
-            case code_type_ldrsb0:
-                //Byte Signed
-                data = read_byte(cpu, address);
-                if(data&0x80) {
-                    data |= 0xffffff00;
-                }
-                break;
-            default:
-                data = Bf?read_byte(cpu, address):read_word(cpu, address);
-            }
-            
-            if(mmu_check_status(&cpu->mmu)) {
-                if(ldrt) {
-                    //LDRT restore cpsr
-                    cpsr(cpu) = tmpcpsr;
-                }
-                cpu->decoder.event_id = EVENT_ID_DATAABT;
-                return;
-            }
-            register_write(cpu, Rd, data);
-            PRINTF("load data [0x%x]:0x%x to R%d \r\n", address, register_read(cpu, Rd), Rd);
-        } else {
-            //STR
-            data = register_read(cpu, Rd);
-            switch(code_type) {
-            case code_type_ldrh1:
-            case code_type_ldrh0:
-                //Halfword
-                write_halfword(cpu, address, data);
-                break;
-            case code_type_ldrsh1:
-            case code_type_ldrsh0:
-                //Halfword Signed ?
-                write_halfword(cpu, address, data);
-                printf("STRSH ? \r\n");
-                exception_out(cpu);
-                break;
-            case code_type_ldrsb1:
-            case code_type_ldrsb0:
-                //Byte Signed ?
-                write_byte(cpu, address, data);
-                printf("STRSB ? \r\n");
-                exception_out(cpu);
-                break;
-            default:
-                if(Bf) {
-                    write_byte(cpu, address, data);
-                } else {
-                    write_word(cpu, address, data);
-                }
-            }
-
-            if(mmu_check_status(&cpu->mmu)) {
-                if(ldrt) {
-                    //LDRT restore cpsr
-                    cpsr(cpu) = tmpcpsr;
-                }
-                cpu->decoder.event_id = EVENT_ID_DATAABT;
-                return;
-            }
-            PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd, data, address);
-        }
-        if(!(!Wf && Pf)) {
-            //Update base register
-            register_write(cpu, Rn, aluout);
-            PRINTF("[LDR]write register R%d = 0x%x\r\n", Rn, aluout);
-        }
-        
-        if(ldrt) {
-            //LDRT restore cpsr
-            cpsr(cpu) = tmpcpsr;
-        }
-    }
+        code_ldr(cpu, ins, operand1, operand2);
         break;
     case code_type_ldm:
-        if(Lf) { //bit [20]
-            //LDM
-            uint8_t ldm_type = 0;
-            if(Bit22 && !IS_SET(ins.word, 15)) {
-                //LDM(2)
-                ldm_type = 1;
-            }
-            
-            uint8_t pc_include_flag = 0;
-            uint32_t address = operand1;
-            for(int i=0; i<16; i++) {
-                int n = (Uf)?i:(15-i);
-                if(IS_SET(ins.word, n)) {
-                    if(Pf) {
-                        if(Uf) address += 4;
-                        else address -= 4;
-                    }
-                    uint32_t data = read_word(cpu, address);
-                    if(mmu_check_status(&cpu->mmu)) {
-                        cpu->decoder.event_id = EVENT_ID_DATAABT;
-                        return;
-                    }
-                    if(n == 15) {
-                        data &= 0xfffffffc;
-                        if(Bit22) {
-                            pc_include_flag = 1;
-                        }
-                    }
-                    if(ldm_type) {
-                        //LDM(2)
-                        register_write_user_mode(cpu, n, data);
-                    } else {
-                        //LDM(1)
-                        register_write(cpu, n, data);
-                    }
-                    
-                    PRINTF("[LDM] load data [0x%x]:0x%x to R%d \r\n", address, data, n);
-                    if(!Pf) {
-                        if(Uf) address += 4;
-                        else address -= 4;
-                    }
-                }
-            }
-            
-            if(Wf) {  //bit[21] W
-                register_write(cpu, Rn, address);
-                PRINTF("[LDM] write R%d = 0x%0x \r\n", Rn, address);
-            }
-            
-            if(pc_include_flag) {
-                //LDM(3) copy spsr to cpsr
-                uint8_t cpu_mode = get_cpu_mode_code(cpu);
-                cpsr(cpu) = cpu->spsr[cpu_mode];
-                PRINTF("ldm(3) cpsr 0x%x copy from spsr %d\r\n", cpsr(cpu), cpu_mode);
-            }
-            
-        } else {
-            uint8_t stm_type = 0;
-            if(Bit22) {
-                //STM(2)
-                stm_type = 1;
-            }
-            //STM
-            uint32_t address = operand1;
-            for(int i=0; i<16; i++) {
-                int n = (Uf)?i:(15-i);
-                if(IS_SET(ins.word, n)) {
-                    if(Pf) {
-                        if(Uf) address += 4;
-                        else address -= 4;
-                    }
-                    if(stm_type) {
-                        //STM(2)
-                        write_word(cpu, address, register_read_user_mode(cpu, n));
-                    } else {
-                        //STM(1)
-                        write_word(cpu, address, register_read(cpu, n));
-                    }
-                    
-                    PRINTF("[STM] store data [R%d]:0x%x to 0x%x \r\n", n, register_read(cpu, n), address);
-                    if(mmu_check_status(&cpu->mmu)) {
-                        cpu->decoder.event_id = EVENT_ID_DATAABT;
-                        return;
-                    }
-                    
-                    if(!Pf) {
-                        if(Uf) address += 4;
-                        else address -= 4;
-                    }
-                }
-            }
-            
-            if(Wf) {  //bit[21] W
-                register_write(cpu, Rn, address);
-                PRINTF("[STM] write R%d = 0x%0x \r\n", Rn, address);
-            }
-        }
-        break;
-    case code_type_msr0:
-    case code_type_msr1:
-    {
-        uint8_t cpu_mode;
-        if(!Bit22) {
-            //write cpsr
-            cpu_mode = 0;
-            if(cpsr_m(cpu) == CPSR_M_USR && (Rn&0x7) ) {
-                printf("[MSR] cpu is user mode, flags field can write only\r\n");
-                exception_out(cpu);
-            }
-        } else {
-            //write spsr
-            cpu_mode = get_cpu_mode_code(cpu);
-            if(cpu_mode == 0) {
-                printf("[MSR] user mode has not spsr\r\n");
-                exception_out(cpu);
-            }
-        }
-        if(IS_SET(Rn, 0) ) {
-            cpu->spsr[cpu_mode] &= 0xffffff00;
-            cpu->spsr[cpu_mode] |= aluout&0xff;
-        }
-        if(IS_SET(Rn, 1) ) {
-            cpu->spsr[cpu_mode] &= 0xffff00ff;
-            cpu->spsr[cpu_mode] |= aluout&0xff00;
-        }
-        if(IS_SET(Rn, 2) ) {
-            cpu->spsr[cpu_mode] &= 0xff00ffff;
-            cpu->spsr[cpu_mode] |= aluout&0xff0000;
-        }
-        if(IS_SET(Rn, 3) ) {
-            cpu->spsr[cpu_mode] &= 0x00ffffff;
-            cpu->spsr[cpu_mode] |= aluout&0xff000000;
-        }
-        PRINTF("write register spsr_%d = 0x%x\r\n", cpu_mode, cpu->spsr[cpu_mode]);
-    }
-        break;
-    case code_type_mult:
-        register_write(cpu, Rn, aluout);   //Rd and Rn swap, !!!
-        PRINTF("[MULT] write register R%d = 0x%x\r\n", Rn, aluout);
-        
-        if(Bit20) {
-            //Update CPSR register
-            uint8_t out_sign = IS_SET(aluout, 31);
-            
-            cpsr_n_set(cpu, out_sign);
-            cpsr_z_set(cpu, aluout == 0);
-            //cv unaffected
-            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
-        }
-        break;
-    case code_type_multl:
-    {
-        uint64_t multl_long = 0;
-        uint8_t negative = 0;
-        uint32_t rs_num = operand2;
-        uint32_t rm_num = register_read(cpu, Rs);
-        if(Bit22) {
-            //Signed
-            if(IS_SET(rm_num, 31)) {
-                rm_num = ~rm_num + 1;
-                negative++;
-            }
-            
-            if(IS_SET(rs_num, 31)) {
-                rs_num = ~rs_num + 1;
-                negative++;
-            }
-        }
-        
-        multl_long = (uint64_t)rm_num * rs_num;
-        if( negative == 1 ) {
-            //Set negative sign
-            multl_long = ~(multl_long - 1);
-        }
-        
-        if(opcode&1) {
-            multl_long += ( ((uint64_t)operand1 << 32) | register_read(cpu, Rd));
-        }
-        
-        register_write(cpu, Rn, multl_long >> 32);
-        register_write(cpu, Rd, multl_long&0xffffffff);
-        PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n",
-        register_read(cpu, Rn), Rn, register_read(cpu, Rd), Rd, rm_num, rs_num);
-        
-        if(Bit20) {
-            //Update CPSR register
-            uint8_t out_sign = IS_SET(multl_long, 63);
-            
-            cpsr_n_set(cpu, out_sign);
-            cpsr_z_set(cpu, multl_long == 0);
-            //cv unaffecteds
-            PRINTF("update flag nzcv %d%d%d%d \r\n", cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
-        }
-    }
+        code_ldm(cpu, ins, operand1);
         break;
     case code_type_mrs:
-        if(Bit22) {
-            uint8_t mode = get_cpu_mode_code(cpu);
-            register_write(cpu, Rd, cpu->spsr[mode]);
-            PRINTF("write register R%d = [spsr]0x%x\r\n", Rd, cpu->spsr[mode]);
-        } else {
-            register_write(cpu, Rd, cpsr(cpu));
-            PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr(cpu));
-        }
+    case code_type_msr1:
+    case code_type_msr0:
+        code_msr(cpu, ins, operand2);
         break;
     case code_type_mcr:
-        //  cp_num       Rs
-        //  register     Rd
-        //  cp_register  Rn
-        if(Bit20) {
-            //mrc
-            if(ins.mcr.cp_num == 15) {
-                uint32_t cp15_val = cp15_read(&cpu->mmu, ins.mcr.opcode2, ins.mcr.CRn);
-                register_write(cpu, Rd, cp15_val);
-                PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n", Rs, ins.mcr.CRn, cp15_val, ins.mcr.opcode2, Rd);
-            } else {
-                ERROR("read unsupported cp%d_c%d \r\n", Rs, ins.mcr.CRn);
-            }
-        } else {
-            //mcr
-            uint32_t register_val = register_read(cpu, Rd);
-            if(ins.mcr.cp_num == 15) {
-                cp15_write(&cpu->mmu, ins.mcr.opcode2, ins.mcr.CRn, register_val);
-                PRINTF("write R%d[0x%x] to cp%d_c%d \r\n", Rd, register_val, ins.mcr.cp_num, ins.mcr.CRn);
-            } else {
-                ERROR("write unsupported cp%d_c%d \r\n", Rs, ins.mcr.CRn);
-            }
-        }
+        code_mcr(cpu, ins);
+        break;
+    case code_type_mult:
+        //Rd and Rn swap, !!!
+        operand1 = opcode?register_read(cpu, Rd):0; //MLA
+        operand2 *= register_read(cpu, Rs);
+        code_mult(cpu, ins, operand1, operand2);
+        break;
+    case code_type_multl:
+        code_multl(cpu, ins, operand1, operand2);
+        break;
+    case code_type_swp:
+        code_swp(cpu, ins, operand1, operand2);
         break;
     case code_type_swi:
+        cpu->decoder.event_id = EVENT_ID_SWI;
         break;
+    default:
+        cpu->decoder.event_id = EVENT_ID_UNDEF;
     }
 }
-
 
 
 /*****************************END OF FILE***************************/
