@@ -26,6 +26,9 @@
 //exit
 #include <stdlib.h>
 
+#define TLB_SIZE     (0x40)
+
+
 extern uint8_t global_debug_flag;
 #define DEBUG                  (global_debug_flag)
 
@@ -35,6 +38,15 @@ extern uint8_t global_debug_flag;
 
 #define  IS_SET(v, bit) ( ((v)>>(bit))&1 )
 #define  SWAP_VAL(a,b) do{uint32_t tmp = a;a = b;b = tmp;}while(0)
+
+struct tlb_t {
+    uint32_t vaddr;
+    uint32_t paddr;
+    uint8_t  type;
+
+    uint8_t is_manager;
+    uint8_t ap;
+};
 
 
 struct armv4_cpu_t {
@@ -119,6 +131,13 @@ struct armv4_cpu_t {
     struct mmu_t {
         uint32_t reg[16];
         uint8_t mmu_fault;
+
+        struct tlb_t tlb[2][TLB_SIZE];
+        struct tlb_t *tlb_base;
+        uint32_t tlb_hit;
+        uint32_t tlb_total;
+#define TLB_D   (0)
+#define TLB_I   (1)
     }mmu;
 
     struct peripheral_extern_t {
@@ -183,6 +202,8 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, ui
 #define  write_halfword_mode(cpu,m,a,d)     write_mem(cpu,m,a,(d)&0xffff,1)
 #define  write_byte_mode(cpu,m,a,d)         write_mem(cpu,m,a,(d)&0xff,0)
 
+/* mmu */
+void tlb_show(struct mmu_t *mmu);
 
 #endif
 /*****************************END OF FILE***************************/

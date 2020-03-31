@@ -252,6 +252,57 @@ int main(int argc, char **argv)
     printf("Start...\n");
 
     for(;;) {
+        if(step_by_step) {
+            static uint32_t skip_num = 0;
+            if(skip_num) {
+                --skip_num;
+                goto RUN;
+            }
+            printf("[%d] cmd>\n", cpu->code_counter);
+            char cmd_str[64] = {0, };
+            uint8_t cmd_len = 0;
+            for(cmd_len=0; cmd_len<64; cmd_len++) {
+                while(!kbhit())
+                    usleep(1000);
+                if((cmd_str[cmd_len] = getch()) == '\n')
+                    break;
+                putchar(cmd_str[cmd_len]);
+            }
+            cmd_str[cmd_len] = 0;
+            printf("\n");
+            switch(cmd_str[0]) {
+            case 'm':
+                printf("MMU table base: 0x%08x\n", cpu->mmu.reg[2]);
+                for(int i=0; i<4096; i++) {
+                    if(i && i % 16 == 0)
+                        printf("\n");
+                    printf("%08x, ", read_word_without_mmu(cpu,
+                     cpu->mmu.reg[2]+(i<<2)));
+                }
+                printf("\n-----------MMU table end--------------\n");
+                break;
+            case 'r':
+                if(sscanf(cmd_str, "r %d", &skip_num) != 1) {
+                    skip_num = 0;
+                }
+                printf("skip %d ...\n", skip_num);
+                goto RUN;
+                break;
+            case 'd':
+                global_debug_flag = !global_debug_flag;
+                printf("[%s] debug info\n", global_debug_flag ? "x" : " ");
+                break;
+            case 'l':
+                tlb_show(&cpu->mmu);
+                break;
+            case 'q':
+                printf("quit\n");
+                exit(0);
+                break;
+            }
+            continue;
+        }
+RUN:
         cpu->code_counter++;
         cpu->decoder.event_id = EVENT_ID_IDLE;
 
@@ -276,11 +327,6 @@ int main(int argc, char **argv)
             if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 65536)) {
                 interrupt_exception(cpu, INT_EXCEPTION_IRQ);
             }
-        }
-
-        if(step_by_step) {
-            printf("[%d] Press any key to continue...\n", cpu->code_counter);
-            getchar();
         }
     }
 

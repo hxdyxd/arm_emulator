@@ -154,6 +154,10 @@ static void exception_out(struct armv4_cpu_t *cpu)
 
 
 /*************cp15************/
+static inline void tlb_invalidata(struct mmu_t *mmu, uint32_t vaddr,
+ uint8_t CRm, uint8_t op2);
+static int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap,
+ uint8_t privileged, uint8_t wr);
 
 #define   cp15_ctl(mmu)            (mmu)->reg[1]
 #define   cp15_ttb(mmu)            (mmu)->reg[2]
@@ -175,27 +179,156 @@ static void exception_out(struct armv4_cpu_t *cpu)
 //high vectors
 #define  cp15_ctl_v(mmu)  IS_SET(cp15_ctl(mmu), 13)
 
+/*
+ *s:TLB_D,TLB_I
+ */
+#define tlb_set_base(mmu,s)  (mmu)->tlb_base = (mmu)->tlb[s]
 
-static inline uint32_t cp15_read(struct mmu_t *mmu, uint8_t op2, uint8_t CRn)
+
+static inline uint32_t cp15_read(struct mmu_t *mmu, uint8_t CRn, uint8_t CRm,
+ uint32_t op2)
 {
-    if(!CRn && op2) {
-        //Cache Type register
+    switch(CRn) {
+    case 0:
+        if(op2)
+            return 0; //Cache Type register
+        else
+            return mmu->reg[CRn]; //Main ID register
+    case 1:
+    case 2:
+    case 3:
+    case 5:
+    case 6:
+        return mmu->reg[CRn];
+    case 7:
+        //Cache functions
+        return 0;
+    case 8:
+        //TLB functions
+        return 0;
+    default:
+        WARN("CP15: read unsupport CRn:%d CRm:%d op2%d\n", CRn, CRm, op2);
         return 0;
     }
-    return mmu->reg[CRn];
 }
 
-static inline void cp15_write(struct mmu_t *mmu, uint8_t op2, uint8_t CRn, uint32_t val)
+
+//mcr p15, 0, Rd, CRn, CRm, op2
+static inline void cp15_write(struct mmu_t *mmu, uint32_t Rd_val, uint8_t CRn,
+ uint8_t CRm, uint32_t op2)
 {
-    mmu->reg[CRn] = val;
+    switch(CRn) {
+    case 0:
+        break;
+    case 1:
+    case 2:
+    case 3:
+    case 5:
+    case 6:
+        mmu->reg[CRn] = Rd_val;
+        break;
+    case 7:
+        //Cache functions
+        break;
+    case 8:
+        //TLB functions
+        tlb_invalidata(mmu, Rd_val, CRm, op2);
+        break;
+    default:
+        WARN("CP15: write unsupport Rd_val:%08x CRn:%d CRm:%d op2%d\n",
+         Rd_val, CRn, CRm, op2);
+        break;
+    }
 }
+
 
 static inline void cp15_reset(struct mmu_t *mmu)
 {
     memset(mmu->reg, 0, sizeof(mmu->reg));
+    memset(mmu->tlb[0], 0, sizeof(struct tlb_t)*TLB_SIZE*2);
     //Main ID register
-    mmu->reg[0] = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5; 
+    mmu->reg[0] = (0x41 << 24) | (0x0 << 20) | (0x2 << 16) | (0x920 << 4) | 0x5;
+    tlb_set_base(mmu, TLB_I);
 }
+
+
+/*************tlb*****************/
+
+
+void tlb_show(struct mmu_t *mmu)
+{
+    struct tlb_t *tlb = mmu->tlb[TLB_D];
+    for(int i=0; i<TLB_SIZE; i++) {
+        WARN("TLB_D: [%d] va:%08x pa:%08x type:%d\n",
+         i, tlb[i].vaddr, tlb[i].paddr, tlb[i].type);
+    }
+    tlb =mmu->tlb[TLB_I];
+    for(int i=0; i<TLB_SIZE; i++) {
+        WARN("TLB_I: [%d] va:%08x pa:%08x type:%d\n",
+         i, tlb[i].vaddr, tlb[i].paddr, tlb[i].type);
+    }
+    WARN("TLB: %d/%d = %.3f\n", mmu->tlb_hit, mmu->tlb_total,
+     mmu->tlb_hit*1.0/mmu->tlb_total);
+}
+
+
+#define tlb_set_manager(m,v,p) _tlb_set(m,v,p,1,0)
+#define tlb_set_client(m,v,p,ap) _tlb_set(m,v,p,0,ap)
+
+static inline void _tlb_set(struct mmu_t *mmu, uint32_t vaddr, uint32_t paddr,
+ uint8_t is_manager, uint8_t ap)
+{
+    struct tlb_t *tlb = mmu->tlb_base;
+    uint32_t index = (vaddr >> 10) % TLB_SIZE;
+    tlb[index].vaddr = vaddr & 0xFFFFFC00;
+    tlb[index].paddr = paddr & 0xFFFFFC00;
+    tlb[index].is_manager = is_manager;
+    tlb[index].ap = ap;
+    tlb[index].type = 1;
+}
+
+
+static inline void tlb_invalidata(struct mmu_t *mmu, uint32_t vaddr,
+ uint8_t CRm, uint8_t op2)
+{
+    if(CRm & 1) {
+        //instruction
+        if(op2) {
+            uint32_t index = (vaddr >> 10) % TLB_SIZE;
+            mmu->tlb[TLB_I][index].type = 0;
+        } else {
+            memset(mmu->tlb[TLB_I], 0, sizeof(struct tlb_t)*TLB_SIZE);
+        }
+    }
+    if(CRm & 2) {
+        //data
+        if(op2) {
+            uint32_t index = (vaddr >> 10) % TLB_SIZE;
+            mmu->tlb[TLB_D][index].type = 0;
+        } else {
+            memset(mmu->tlb[TLB_D], 0, sizeof(struct tlb_t)*TLB_SIZE);
+        }
+    }
+}
+
+
+static inline uint8_t tlb_get(struct mmu_t *mmu, uint32_t vaddr, uint32_t *paddr,
+ uint8_t privileged, uint8_t wr)
+{
+    struct tlb_t *tlb = mmu->tlb_base;
+    uint32_t index = (vaddr >> 10) % TLB_SIZE;
+    if(!tlb[index].type || tlb[index].vaddr != (vaddr&0xFFFFFC00))
+        return 0; //TLB miss
+    *paddr = tlb[index].paddr | (vaddr & 0x000003FF);
+    if(tlb[index].is_manager)
+        return 1; //TLB hit
+    if(mmu_check_access_permissions(mmu, tlb[index].ap, privileged, wr) == 0)
+        return 1; //TLB hit
+    return 0; //TLB miss
+}
+
+
+/*************tlb*****************/
 
 
 /*
@@ -237,27 +370,12 @@ static inline int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap,
 }
 
 
-/*
- *  uint8_t wr:                write: 1, read: 0
- *  uint8_t privileged:   privileged: 1, user: 0
- * author:hxdyxd
- */
-static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
- uint8_t mask, uint8_t privileged, uint8_t wr)
+static inline uint32_t mmu_page_table_walk(struct armv4_cpu_t *cpu,
+ uint32_t vaddr, uint8_t privileged, uint8_t wr)
 {
     struct mmu_t *mmu = &cpu->mmu;
-    mmu->mmu_fault = 0;
-    if(!cp15_ctl_m(mmu)) {
-        return vaddr;
-    }
-    if(cp15_ctl_a(mmu) && (vaddr&mask)) {
-        //Check address alignment
-        cp15_fsr(mmu) = 0x1;
-        cp15_far(mmu) = vaddr;
-        mmu->mmu_fault = 1;
-        PRINTF("address alignment fault va = 0x%x\n", vaddr);
-        return 0xffffffff;
-    }
+    uint32_t paddr = 0xffffffff;
+    //page table walk
     //section page table, store size 16KB
     uint32_t page_table_entry = read_word_without_mmu(cpu,
      (cp15_ttb(mmu)&0xFFFFC000) | ((vaddr&0xFFF00000) >> 18));
@@ -267,6 +385,7 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
     domainval = (cp15_domain(mmu) >> domainval)&0x3;
 
     uint8_t first_level_descriptor = page_table_entry&3;
+    
     switch(first_level_descriptor) {
     case 0:
         //Section translation fault
@@ -279,6 +398,7 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
         //section entry
         switch(domainval) {
         case 0:
+        case 2:
             //Section domain fault
             cp15_fsr(mmu) = (domain << 4) | 0x9;
             cp15_far(mmu) = vaddr;
@@ -289,8 +409,11 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
             do {
                 //Client, Check access permissions
                 uint8_t ap = (page_table_entry>>10)&0x3;
-                if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0)
-                    return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
+                if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
+                    paddr = (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
+                    tlb_set_client(mmu, vaddr, paddr, ap);
+                    return paddr;
+                }
                 //Section permission fault
                 cp15_fsr(mmu) = (domain << 4) | 0xd;
                 cp15_far(mmu) = vaddr;
@@ -300,10 +423,10 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
             break;
         case 3:
             //Manager
-            return (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
+            paddr = (page_table_entry&0xFFF00000)|(vaddr&0x000FFFFF);
+            tlb_set_manager(mmu, vaddr, paddr);
+            return paddr;
         default:
-            WARN("mmu fault\n");
-            exception_out(cpu);
             break;
         }
         break;
@@ -329,11 +452,12 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
         } else {
             switch(domainval) {
             case 0:
+            case 2:
                 //Page domain fault
                 cp15_fsr(mmu) = (domain << 4) | 0xb;
                 cp15_far(mmu) = vaddr;
                 mmu->mmu_fault = 1;
-                WARN("Page domain fault\n");
+                PRINTF("Page domain fault\n");
                 break;
             case 1:
                 //Client, Check access permissions
@@ -343,8 +467,11 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
                         //large page, 64KB
                         uint8_t subpage = (vaddr >> 14)&3;
                         uint8_t ap = (page_table_entry >> ((subpage<<1)+4))&0x3;
-                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0)
-                            return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
+                            paddr = (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+                            tlb_set_client(mmu, vaddr, paddr, ap);
+                            return paddr;
+                        }
                     }while(0);
                     break;
                 case 2:
@@ -352,16 +479,22 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
                         //small page, 4KB
                         uint8_t subpage = (vaddr >> 10)&3;
                         uint8_t ap = (page_table_entry >> ((subpage<<1)+4))&0x3;
-                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0)
-                            return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
+                            paddr = (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+                            tlb_set_client(mmu, vaddr, paddr, ap);
+                            return paddr;
+                        }
                     }while(0);
                     break;
                 case 3:
                     do {
                         //tiny page, 1KB
                         uint8_t ap = (page_table_entry>>4)&0x3; //ap0
-                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0)
-                            return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
+                        if(mmu_check_access_permissions(mmu, ap, privileged, wr) == 0) {
+                            paddr = (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
+                            tlb_set_client(mmu, vaddr, paddr, ap);
+                            return paddr;
+                        }
                     }while(0);
                     break;
                 }
@@ -376,18 +509,23 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
                 switch(second_level_descriptor) {
                 case 1:
                     //large page, 64KB
-                    return (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+                    paddr = (page_table_entry&0xFFFF0000)|(vaddr&0x0000FFFF);
+                    break;
                 case 2:
                     //small page, 4KB
-                    return (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+                    paddr = (page_table_entry&0xFFFFF000)|(vaddr&0x00000FFF);
+                    break;
                 case 3:
                     //tiny page, 1KB
-                    return (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
+                    paddr = (page_table_entry&0xFFFFFC00)|(vaddr&0x000003FF);
+                    break;
+                default:
+                    break;
                 }
+                tlb_set_manager(mmu, vaddr, paddr);
+                return paddr;
                 break;
             default:
-                printf("mmu fault\n");
-                exception_out(cpu);
                 break;
             } /* end switch(domainval) */
         } /* end if(second_level_descriptor == 0) */
@@ -395,6 +533,38 @@ static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
     }
     return 0xffffffff;
 }
+
+
+/*
+ *  uint8_t wr:                write: 1, read: 0
+ *  uint8_t privileged:   privileged: 1, user: 0
+ * author:hxdyxd
+ */
+static inline uint32_t mmu_transfer(struct armv4_cpu_t *cpu, uint32_t vaddr,
+ uint8_t mask, uint8_t privileged, uint8_t wr)
+{
+    struct mmu_t *mmu = &cpu->mmu;
+    mmu->mmu_fault = 0;
+    if(!cp15_ctl_m(mmu)) {
+        return vaddr;
+    }
+    if(cp15_ctl_a(mmu) && (vaddr&mask)) {
+        //Check address alignment
+        cp15_fsr(mmu) = 0x1;
+        cp15_far(mmu) = vaddr;
+        mmu->mmu_fault = 1;
+        PRINTF("address alignment fault va = 0x%x\n", vaddr);
+        return 0xffffffff;
+    }
+    uint32_t paddr = 0xffffffff;
+    ++mmu->tlb_total;
+    if(tlb_get(mmu, vaddr, &paddr, privileged, wr)) {
+        ++mmu->tlb_hit;
+        return paddr;
+    }
+    return mmu_page_table_walk(cpu, vaddr, privileged, wr);
+}
+
 
 /****cp15 end***********************************************************/
 
@@ -554,11 +724,13 @@ void cpu_init(struct armv4_cpu_t *cpu)
 
 void fetch(struct armv4_cpu_t *cpu)
 {
-    uint32_t pc = register_read(cpu, 15) - 4; //current pc
+    uint32_t pc_val = register_read(cpu, 15) - 4; //current pc_val
     
-    cpu->decoder.instruction_word = read_word(cpu, pc);
-    PRINTF("[0x%04x]: ", pc);
-    register_write(cpu, 15, pc + 4 ); //current pc add 4
+    tlb_set_base(&cpu->mmu, TLB_I);
+    cpu->decoder.instruction_word = read_word(cpu, pc_val);
+    tlb_set_base(&cpu->mmu, TLB_D);
+    PRINTF("[0x%04x]: ", pc_val);
+    register_write(cpu, 15, pc_val + 4 ); //current pc_val add 4
     if(mmu_check_status(&cpu->mmu)) {
         cpu->decoder.event_id = EVENT_ID_PREAABT;
     }
@@ -1682,26 +1854,23 @@ static void code_mcr(struct armv4_cpu_t *cpu, const union ins_t ins)
     //  cp_num       Rs
     //  register     Rd
     //  cp_register  Rn
+    if(ins.mcr.cp_num != 15)
+        return;
+    uint32_t Rd_val;
     if(Bit20) {
         //mrc
-        if(ins.mcr.cp_num == 15) {
-            uint32_t val = cp15_read(&cpu->mmu, ins.mcr.opcode2, ins.mcr.CRn);
-            register_write(cpu, Rd, val);
-            PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n",
-             Rs, ins.mcr.CRn, val, ins.mcr.opcode2, Rd);
-        } else {
-            ERROR("read unsupported cp%d_c%d \r\n", Rs, ins.mcr.CRn);
-        }
+        Rd_val = cp15_read(&cpu->mmu, ins.mcr.CRn, ins.mcr.CRm, ins.mcr.opcode2);
+        register_write(cpu, Rd, Rd_val);
+
+        PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n",
+         Rs, ins.mcr.CRn, Rd_val, ins.mcr.opcode2, Rd);
     } else {
         //mcr
-        uint32_t val = register_read(cpu, Rd);
-        if(ins.mcr.cp_num == 15) {
-            cp15_write(&cpu->mmu, ins.mcr.opcode2, ins.mcr.CRn, val);
-            PRINTF("write R%d[0x%x] to cp%d_c%d \r\n",
-             Rd, val, ins.mcr.cp_num, ins.mcr.CRn);
-        } else {
-            ERROR("write unsupported cp%d_c%d \r\n", Rs, ins.mcr.CRn);
-        }
+        Rd_val = register_read(cpu, Rd);
+        cp15_write(&cpu->mmu, Rd_val, ins.mcr.CRn, ins.mcr.CRm, ins.mcr.opcode2);
+
+        PRINTF("write R%d[0x%x] to cp%d_c%d \r\n",
+         Rd, Rd_val, ins.mcr.cp_num, ins.mcr.CRn);
     }
 }
 
