@@ -174,15 +174,6 @@ void *slip_out_task_proc(void *par)
     while(slip_out_task_run_flag) {
         int total_len = recv_packet(slip_out_buffer, BUF_SIZE);
 
-#if CHECK_SUM_ON
-        int temp_len = total_len;
-        total_len = if_api_check(slip_out_buffer, total_len);
-        if(total_len < 0) {
-            DEBUG_PRINTF("lost %d bytes\n", temp_len);
-            continue;
-        }
-#endif
-
 #if 0
         DEBUG_PRINTF("SLIP R=%d\n", total_len);
 #endif
@@ -224,7 +215,7 @@ void *tun_out_task_proc(void *par)
     prctl(PR_SET_NAME,"tun_out_task");
     DEBUG_PRINTF("tun out task enter success %d!\n", tun_fd);
     while(tun_out_task_run_flag) {
-        int total_len = read(tun_fd, tun_out_buffer, BUF_SIZE-2);
+        int total_len = read(tun_fd, tun_out_buffer, BUF_SIZE);
 #if 0
         DEBUG_PRINTF("TUN R=%d\n", total_len);
 #endif
@@ -236,10 +227,6 @@ void *tun_out_task_proc(void *par)
             return NULL;
         }
         
-#if CHECK_SUM_ON
-        total_len = if_api_calculate_checksum(tun_out_buffer, total_len);
-#endif
-
         send_packet(tun_out_buffer, total_len);
     }
     close(tun_fd);
@@ -257,7 +244,7 @@ int tun_out_task_start(void)
      *        IFF_TAP   - TAP device
      *        IFF_NO_PI - Do not provide packet information
      */
-    tun_fd = tun_alloc(IFF_TAP | IFF_NO_PI);
+    tun_fd = tun_alloc(IFF_TUN | IFF_NO_PI);
     if (tun_fd < 0) {
         ERROR_PRINTF("allocating interface error\n");
         return -1;
@@ -443,39 +430,6 @@ int recv_packet(unsigned char *p, int len)
     return received;
 }
 
-
-#if CHECK_SUM_ON
-int if_api_calculate_checksum(void *buf, int len)
-{
-    uint8_t *p = (uint8_t *)buf;
-    uint16_t sum = 0;
-    int l = len;
-    while(l--)
-        sum += *p++;
-    sum = ~sum;
-
-    *p++ = (sum >> 8) & 0x7f;
-    *p = sum & 0x7f;
-    return len + 2;
-}
-
-int if_api_check(void *buf, int len)
-{
-    uint8_t *p = (uint8_t *)buf;
-    if(len < 2)
-        return -1;
-    len -= 2;
-    uint8_t chechsum_low = p[len+1];
-    uint8_t chechsum_high = p[len];
-    p[len+1] = 0;
-    p[len] = 0;
-    if_api_calculate_checksum(p, len);
-
-    if(chechsum_low != p[len+1] || chechsum_high != p[len])
-        return -1;
-    return len;
-}
-#endif /* CHECK_SUM_ON */
 
 #else
 

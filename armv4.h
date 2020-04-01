@@ -117,6 +117,7 @@ struct armv4_cpu_t {
 #define  code_type_msr0    20
 #define  code_type_mrs     21
 #define  code_type_mcr     22
+#define  code_type_clz     23
 #define  code_type_unknow  255
 
         uint32_t instruction_word;

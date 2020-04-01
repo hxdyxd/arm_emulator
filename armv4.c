@@ -291,23 +291,17 @@ static inline void _tlb_set(struct mmu_t *mmu, uint32_t vaddr, uint32_t paddr,
 static inline void tlb_invalidata(struct mmu_t *mmu, uint32_t vaddr,
  uint8_t CRm, uint8_t op2)
 {
-    if(CRm & 1) {
-        //instruction
-        if(op2) {
-            uint32_t index = (vaddr >> 10) % TLB_SIZE;
+    if(op2) {
+        uint32_t index = (vaddr >> 10) % TLB_SIZE;
+        if(CRm & 1)
             mmu->tlb[TLB_I][index].type = 0;
-        } else {
-            memset(mmu->tlb[TLB_I], 0, sizeof(struct tlb_t)*TLB_SIZE);
-        }
-    }
-    if(CRm & 2) {
-        //data
-        if(op2) {
-            uint32_t index = (vaddr >> 10) % TLB_SIZE;
+        if(CRm & 2)
             mmu->tlb[TLB_D][index].type = 0;
-        } else {
+    } else {
+        if(CRm & 1)
+            memset(mmu->tlb[TLB_I], 0, sizeof(struct tlb_t)*TLB_SIZE);
+        if(CRm & 2)
             memset(mmu->tlb[TLB_D], 0, sizeof(struct tlb_t)*TLB_SIZE);
-        }
     }
 }
 
@@ -1146,6 +1140,7 @@ static uint8_t code_decoder(const union ins_t ins)
                         //ERROR("Software breakpoint \r\n");
                     } else if(!Bit6 && !Bit5 && opcode == 0xb) {
                         //Count leading zero
+                        code_type = code_type_clz;
                         //ERROR("Count leading zero \r\n");
                     } else {
                         //ERROR("Undefed Miscellaneous instructions\r\n");
@@ -1966,6 +1961,37 @@ static void code_swp(struct armv4_cpu_t *cpu, const union ins_t ins,
 }
 
 
+static void code_clz(struct armv4_cpu_t *cpu, const union ins_t ins,
+ uint32_t operand2)
+{
+    int r = 32;
+    uint32_t x = operand2;
+
+    if (!(x & 0xffff0000u)) {
+        x <<= 16;
+        r -= 16;
+    }
+    if (!(x & 0xff000000u)) {
+        x <<= 8;
+        r -= 8;
+    }
+    if (!(x & 0xf0000000u)) {
+        x <<= 4;
+        r -= 4;
+    }
+    if (!(x & 0xc0000000u)) {
+        x <<= 2;
+        r -= 2;
+    }
+    if (!(x & 0x80000000u)) {
+        x <<= 1;
+        r -= 1;
+    }
+    register_write(cpu, Rd, r);
+}
+
+
+
 void decode(struct armv4_cpu_t *cpu)
 {
     struct decoder_t *dec = &cpu->decoder;
@@ -2088,6 +2114,9 @@ void decode(struct armv4_cpu_t *cpu)
         break;
     case code_type_swp:
         code_swp(cpu, ins, operand1, operand2);
+        break;
+    case code_type_clz:
+        code_clz(cpu, ins, operand2);
         break;
     case code_type_swi:
         cpu->decoder.event_id = EVENT_ID_SWI;

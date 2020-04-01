@@ -1,0 +1,34 @@
+#!/bin/sh
+# Start the network...
+TTY_DEV="ttyS1"
+SLIP_DEV="sl0"
+SLIP_IP="10.0.0.2"
+SLIP_PEER_IP="10.0.0.1"
+
+
+case "$1" in
+  start)
+        slattach /dev/$TTY_DEV -p slip -d &
+        echo -e "Starting the slip:\n"
+        sleep 2
+        ifconfig $SLIP_DEV $SLIP_IP pointopoint $SLIP_PEER_IP mtu 1500 txqueuelen 1000 up
+        route add default gw $SLIP_PEER_IP
+        echo nameserver 8.8.8.8 > /etc/resolv.conf
+        
+        [ $? = 0 ] && echo "OK" || echo "FAIL"
+        ;;
+  stop)
+        printf "Stopping network: "
+        killall slattach
+        [ $? = 0 ] && echo "OK" || echo "FAIL"
+        ;;
+  restart|reload)
+        "$0" stop
+        "$0" start
+        ;;
+  *)
+        echo "Usage: $0 {start|stop|restart}"
+        exit 1
+esac
+
+exit $?

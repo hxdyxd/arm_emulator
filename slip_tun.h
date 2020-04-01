@@ -21,8 +21,6 @@
 
 #include <stdint.h>
 
-#define CHECK_SUM_ON   1
-
 
 int slip_tun_init(void);
 int slip_tun_readable(void);
