@@ -37,6 +37,12 @@ simple armv4 emulator with freertos and linux support, only two thousand lines, 
 Reference: https://github.com/hxdyxd/arm_emulator
 ```
 
+## Build armemulator
+
+```
+sudo make install
+```
+
 ## Build linux zImage with buildroot
 
 ```
@@ -49,3 +55,6 @@ make menuconfig
 make
 ls output/images/
 ```
+
+## Reference
+1.[ARM Architecture Reference Manual](https://developer.arm.com/docs/ddi0100/i/armv5-architecture-reference-manual)  

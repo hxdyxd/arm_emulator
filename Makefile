@@ -1,34 +1,49 @@
 # Makefile of arm_emulator
 # Copyright (C) 2019-2020  hxdyxd <hxdyxd@gmail.com>
 CC = $(CROSS_COMPILE)gcc
+LD = $(CC)
+INSTALL = install
+RM = rm
 
+TARGET = armemulator
 
-TARGET = arm_emulator
-
-C_SRCS = \
-emulator.c\
-armv4.c\
-peripheral.c\
-kfifo.c\
-slip_tun.c
+OBJS = \
+emulator.o\
+armv4.o\
+peripheral.o\
+kfifo.o\
+slip_tun.o
 
 
 C_INCLUDES =  \
 -I./
-C_FLAGS = -O3 -Wall -std=gnu99 -g 
-C_DFLAG =  -D_BSD_SOURCE -D_DEFAULT_SOURCE -DTUN_SUPPORT -DFS_MMAP_MODE
+CFLAGS = -O3 -Wall -std=gnu99 -g -D_BSD_SOURCE -D_DEFAULT_SOURCE -DTUN_SUPPORT -DFS_MMAP_MODE
+LDFLAGS += -lpthread
 
+quiet_CC  =      @echo "  CC      $@"; $(CC)
+quiet_LD  =      @echo "  LD      $@"; $(LD)
+quiet_INSTALL  = @echo "  INSTALL $?"; $(INSTALL)
 
-LIB_NAME = -lpthread
+V = 0
+ifeq ($(V), 0)
+	quiet = quiet_
+else
+	quiet =
+endif
 
+all:$(TARGET)
 
-OBJS = $(patsubst %.c,%.o,$(C_SRCS))
+$(TARGET): $(OBJS)
+	$($(quiet)LD) -o $(TARGET)   $(OBJS) $(LDFLAGS)
 
-all: $(OBJS)
-	$(CC) $(C_FLAGS) $(C_DFLAG)  -o $(TARGET)   $(OBJS) $(LIB_NAME)
-
-%.o:%.c
-	$(CC) $(C_FLAGS) $(C_DFLAG) $(C_INCLUDES) -o $@ -c $<
+%.o: %.c
+	$($(quiet)CC) $(CFLAGS) $(C_INCLUDES) -o $@ -c $<
 
 clean:
-	rm -f $(TARGET) $(OBJS) $(TUN_OBJS)
+	$(RM) -f $(TARGET) $(OBJS)
+
+install:$(TARGET)
+	$($(quiet)INSTALL) -D $< /usr/local/bin/$<
+
+uninstall:
+	$(RM) -f /usr/local/bin/$(TARGET)
