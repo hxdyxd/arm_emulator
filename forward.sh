@@ -9,7 +9,7 @@ TUN_PEER_IP="10.0.0.2"
 echo 1 > /proc/sys/net/ipv4/ip_forward
 echo 1 > /proc/sys/net/ipv6/conf/all/forwarding
 echo 1 > /proc/sys/net/ipv6/conf/default/forwarding
-ifconfig $TUN_DEV $TUN_IP pointopoint $TUN_PEER_IP up
+ifconfig $TUN_DEV $TUN_IP pointopoint $TUN_PEER_IP mtu 1500 txqueuelen 1000 up
 
 
 iptables -t nat -F POSTROUTING

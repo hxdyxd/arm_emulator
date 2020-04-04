@@ -131,7 +131,7 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
     }
     address = start;
     while(!feof(fp)) {
-        fread(&instruction, 4, 1, fp);
+        (void)fread(&instruction, 4, 1, fp);
         write_word(cpu, address, instruction);
         address = address + 4;
     }
