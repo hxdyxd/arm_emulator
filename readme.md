@@ -40,6 +40,7 @@ Reference: https://github.com/hxdyxd/arm_emulator
 ## Build armemulator
 
 ```
+CFLAGS=-static make
 sudo make install
 ```
 

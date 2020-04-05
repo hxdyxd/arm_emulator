@@ -31,8 +31,9 @@
 #define IMAGE_LOAD_ADDRESS   (0x8000)
 #define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
 
-#define MAX_FS_SIZE   (0x2000000)   //32M
-
+#ifndef MAX_FS_SIZE
+#define MAX_FS_SIZE   (1 << 29)   //512M
+#endif
 
 
 //peripheral register
@@ -72,8 +73,8 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
     },
     {
         .name = "Romfs",
-        .mask = ~(MAX_FS_SIZE-1), //25bit
-        .prefix = 0x10000000,
+        .mask = ~(MAX_FS_SIZE-1),
+        .prefix = 0x80000000,
         .reg_base = &peripheral_reg_base.fs,
         .reset = fs_reset,
         .read = fs_read,

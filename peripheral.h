@@ -31,8 +31,10 @@
 #define  GET_TICK()   (clock()*1000/CLOCKS_PER_SEC)
 /*******HAL END*******/
 
-
+#ifndef MEM_SIZE
 #define MEM_SIZE   (1 << 25)  //32M
+#endif
+
 #define UART_NUMBER    (2)
 
 

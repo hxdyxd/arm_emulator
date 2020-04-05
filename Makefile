@@ -36,9 +36,6 @@ all:$(TARGET)
 $(TARGET): $(OBJS)
 	$($(quiet)LD) -o $(TARGET)   $(OBJS) $(LDFLAGS)
 
-static: $(OBJS)
-	$($(quiet)LD) -o $(TARGET)   $(OBJS) $(LDFLAGS) -static
-
 %.o: %.c
 	$($(quiet)CC) $(CFLAGS) $(C_INCLUDES) -o $@ -c $<
 
