@@ -2,14 +2,22 @@
 
 ## Introduction
 
-simple armv4 emulator with freertos and linux support, only two thousand lines, other code at  
-1.[arm-emulator-linux](https://github.com/hxdyxd/arm-emulator-linux), [arm-emulator-linux(Gitee mirror)](https://gitee.com/hxdyxd/arm-emulator-linux)  
-2.[buildroot(Generate embedded Linux systems)](https://github.com/hxdyxd/buildroot)  
-3.[zImage.arm-emulator](https://drive.google.com/drive/folders/1W0milmr0MT9K7TXI4cvJHEbDRon9gp-X?usp=sharing)  
+Simple armv4 emulator with embedded freertos and linux operating system support  
 
-## Device Tree Support
+## Currently supported features
+* All ARMv4 instructions
+* Interrupts (timer interrupt, 8250 serial interrupts)  
+* Prefetch Abort, Data Abort, Undefined instruction, IRQ ,FIQ exceptions  
+* CP15 coprocessor, Memory Management Unit(MMU) and Translation Lookaside Buffer(TLB)  
+* Network support via serial port and TUN/TAP devices for host  
+* Console support via serial port  
+* Step by step running  
 
-[arm-emulator.dts](https://github.com/hxdyxd/arm-emulator-linux/blob/master/arch/arm/boot/dts/arm-emulator.dts)  
+## Other codes
+1.[arm-emulator-linux](https://github.com/hxdyxd/arm-emulator-linux), [arm-emulator-linux(gitee mirror)](https://gitee.com/hxdyxd/arm-emulator-linux)  
+2.[buildroot(generate embedded Linux systems)](https://github.com/hxdyxd/buildroot)  
+3.[Image(google drive)](https://drive.google.com/drive/folders/1W0milmr0MT9K7TXI4cvJHEbDRon9gp-X?usp=sharing)  
+4.[arm-emulator.dts](https://github.com/hxdyxd/arm-emulator-linux/blob/master/arch/arm/boot/dts/arm-emulator.dts)  
 
 ## Usage Example
 
