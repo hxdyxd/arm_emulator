@@ -14,10 +14,10 @@ Simple armv4 emulator with embedded freertos and linux operating system support
 * Step by step running  
 
 ## Other codes
-1.[arm-emulator-linux](https://github.com/hxdyxd/arm-emulator-linux), [arm-emulator-linux(gitee mirror)](https://gitee.com/hxdyxd/arm-emulator-linux)  
-2.[buildroot(generate embedded Linux systems)](https://github.com/hxdyxd/buildroot)  
-3.[Image(google drive)](https://drive.google.com/drive/folders/1W0milmr0MT9K7TXI4cvJHEbDRon9gp-X?usp=sharing)  
-4.[arm-emulator.dts](https://github.com/hxdyxd/arm-emulator-linux/blob/master/arch/arm/boot/dts/arm-emulator.dts)  
+* [arm-emulator-linux](https://github.com/hxdyxd/arm-emulator-linux), [arm-emulator-linux(gitee mirror)](https://gitee.com/hxdyxd/arm-emulator-linux)  
+* [buildroot(generate embedded Linux systems)](https://github.com/hxdyxd/buildroot)  
+* [Image(google drive)](https://drive.google.com/drive/folders/1W0milmr0MT9K7TXI4cvJHEbDRon9gp-X?usp=sharing)  
+* [arm-emulator.dts](https://github.com/hxdyxd/arm-emulator-linux/blob/master/arch/arm/boot/dts/arm-emulator.dts)  
 
 ## Usage Example
 
@@ -66,4 +66,4 @@ ls output/images/
 ```
 
 ## Reference
-1.[ARM Architecture Reference Manual](https://developer.arm.com/docs/ddi0100/i/armv5-architecture-reference-manual)  
+* [ARM Architecture Reference Manual](https://developer.arm.com/docs/ddi0100/i/armv5-architecture-reference-manual)  
