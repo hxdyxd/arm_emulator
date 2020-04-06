@@ -1,0 +1,72 @@
+# arm_emulator
+# Copyright (C) 2019-2020  hxdyxd <hxdyxd@gmail.com>
+name: C/C++ CI
+
+# Controls when the action will run. Triggers the workflow on push or pull request
+# events but only for the master branch
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build-ubuntu-latest:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    - uses: actions/checkout@v2
+
+    - name: Makefile
+      run: |
+        make V=1
+        ./armemulator -h
+
+    - name: CMake
+      run: |
+        mkdir build
+        cd build
+        cmake ..
+        make
+        ./armemulator -h
+
+  build-macOS-latest:
+    # The type of runner that the job will run on
+    runs-on: macOS-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    - uses: actions/checkout@v2
+
+    - name: Makefile
+      run: |
+        make V=1 C_DEFS="-DFS_MMAP_MODE"
+        ./armemulator -h
+
+    - name: CMake
+      run: |
+        mkdir build
+        cd build
+        cmake -DTUN_SUPPORT=OFF ..
+        make
+        ./armemulator -h
+
+  build-windows-latest:
+    # The type of runner that the job will run on
+    runs-on: windows-latest
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+    # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+    - uses: actions/checkout@v2
+
+    - name: Makefile
+      run: |
+        move conio.h conio-unused.h
+        make V=1 C_DEFS=""
+        ./armemulator -h

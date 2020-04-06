@@ -147,6 +147,7 @@ uint32_t memory_reset(void *base);
 uint32_t memory_read(void *base, uint32_t address);
 void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
+void fs_exit(int s, void *base);
 uint32_t fs_reset(void *base);
 uint32_t fs_read(void *base, uint32_t address);
 void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask);

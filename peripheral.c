@@ -72,12 +72,17 @@ void fs_exit(int s, void *base)
 {
     struct fs_t *fs = base;
 #ifdef FS_MMAP_MODE
-    munmap(fs->map, fs->len);
-    close(fs->fd);
+    if(fs->fd) {
+        munmap(fs->map, fs->len);
+        close(fs->fd);
+        printf("Exit fs %s\n", fs->filename);
+    }
 #else
-    fclose(fs->fp);
+    if(fs->fp) {
+        fclose(fs->fp);
+        printf("Exit fs %s\n", fs->filename);
+    }
 #endif
-    printf("Exit fs\n");
 }
 
 
@@ -108,7 +113,6 @@ uint32_t fs_reset(void *base)
         }
         ret = 1;
 #endif
-        on_exit(fs_exit, base);
     }
     return ret;
 }

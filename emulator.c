@@ -23,8 +23,6 @@
 
 #include <unistd.h>
 #include <signal.h>
-#include <sys/time.h>
-#include <sys/select.h>
 #include <slip_tun.h>
 
 
@@ -131,11 +129,18 @@ static void enable_step_by_step(int sig)
 }
 
 
+static void romfs_exit(void)
+{
+    fs_exit(0, &peripheral_reg_base.fs);
+}
+
+
 //load_program_memory reads the input memory, and populates the instruction 
 // memory
 uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uint32_t start)
 {
     FILE *fp;
+    int ret = 0;
     unsigned int address, instruction;
     fp = fopen(file_name, "rb");
     if(fp == NULL) {
@@ -144,8 +149,8 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
     }
     address = start;
     while(!feof(fp)) {
-        if(fread(&instruction, 4, 1, fp) < 0) {
-            ERROR("Error fread mem file %s\n", file_name);
+        if((ret = fread(&instruction, 4, 1, fp)) < 0) {
+            ERROR("Error fread mem file %s, %d\n", file_name, ret);
             exit(-1);
         }
         write_word(cpu, address, instruction);
@@ -268,6 +273,7 @@ int main(int argc, char **argv)
 
     atexit(slip_tun_exit);
     slip_tun_init();
+    atexit(romfs_exit);
     cpu_init(cpu);
     peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
 
@@ -305,12 +311,7 @@ int main(int argc, char **argv)
             uint8_t cmd_len = 0;
             for(cmd_len=0; cmd_len<64; cmd_len++) {
                 while(!kbhit()) {
-                    //usleep 1000
-                    struct timeval timeout = {
-                        .tv_sec = 0,
-                        .tv_usec = 1000,
-                    };
-                    select(0, NULL, NULL, NULL, &timeout);
+                    usleep(1000);
                 }
                 if((cmd_str[cmd_len] = getch()) == '\n')
                     break;

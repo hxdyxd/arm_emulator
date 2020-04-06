@@ -16,8 +16,9 @@ slip_tun.o
 
 
 C_INCLUDES =  \
--I./
-CFLAGS += -O3 -Wall -std=gnu99 -g -DTUN_SUPPORT -DFS_MMAP_MODE
+-I.
+C_DEFS += -DTUN_SUPPORT -DFS_MMAP_MODE
+CFLAGS += -O3 -Wall -std=gnu99 -g $(C_DEFS)
 LDFLAGS += -lpthread
 
 quiet_CC  =      @echo "  CC      $@"; $(CC)

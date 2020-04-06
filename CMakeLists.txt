@@ -4,7 +4,6 @@ cmake_minimum_required (VERSION 2.8)
 
 project(arm_emulator)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O3 -Wall -std=gnu99")
-set(CMAKE_EXE_LINKER_FLAGS -static)
 
 option (TUN_SUPPORT "Use tun/tap device for host" ON)
 option (FS_MMAP_MODE "Use mmap fs mode" ON)
