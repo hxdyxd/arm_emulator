@@ -255,7 +255,7 @@ int main(int argc, char **argv)
         case 'v':
         case 'h':
             usage(argv[0]);
-            exit(-1);
+            exit(0);
         case '?': // 输入未定义的选项, 都会将该选项的值变为 ?
             printf("unknown option \n");
             usage(argv[0]);
