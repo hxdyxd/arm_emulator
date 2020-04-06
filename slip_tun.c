@@ -133,7 +133,11 @@ void send_char(int ch)
 #ifdef TUN_MUTEX_MODE
         pthread_mutex_lock(&send_mut);
 #else
-        usleep(20);
+        struct timeval timeout = {
+            .tv_sec = 0,
+            .tv_usec = 20,
+        };
+        select(0, NULL, NULL, NULL, &timeout);
 #endif
     }
 }
@@ -152,7 +156,11 @@ int recv_char(void)
 #ifdef TUN_MUTEX_MODE
         pthread_mutex_lock(&recv_mut);
 #else
-        usleep(20);
+        struct timeval timeout = {
+            .tv_sec = 0,
+            .tv_usec = 20,
+        };
+        select(0, NULL, NULL, NULL, &timeout);
 #endif
     }
     return ch;

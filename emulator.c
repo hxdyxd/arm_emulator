@@ -23,6 +23,8 @@
 
 #include <unistd.h>
 #include <signal.h>
+#include <sys/time.h>
+#include <sys/select.h>
 #include <slip_tun.h>
 
 
@@ -302,8 +304,14 @@ int main(int argc, char **argv)
             char cmd_str[64] = {0, };
             uint8_t cmd_len = 0;
             for(cmd_len=0; cmd_len<64; cmd_len++) {
-                while(!kbhit())
-                    usleep(1000);
+                while(!kbhit()) {
+                    //usleep 1000
+                    struct timeval timeout = {
+                        .tv_sec = 0,
+                        .tv_usec = 1000,
+                    };
+                    select(0, NULL, NULL, NULL, &timeout);
+                }
                 if((cmd_str[cmd_len] = getch()) == '\n')
                     break;
                 putchar(cmd_str[cmd_len]);
