@@ -23,6 +23,7 @@
 
 
 int slip_tun_init(void);
+void slip_tun_exit(void);
 int slip_tun_readable(void);
 int slip_tun_read(void);
 int slip_tun_writeable(void);

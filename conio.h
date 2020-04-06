@@ -40,6 +40,9 @@ static inline void enable_raw_mode(void)
     tcgetattr(STDIN_FILENO, &conio_orig_termios);
     struct termios term = conio_orig_termios;
     term.c_lflag &= ~(ICANON | ECHO); // Disable echo as well
+    term.c_cc[VINTR] = 'b' & 0x9f; //^B
+    term.c_cc[VSUSP] = 0; //undef
+    term.c_cc[VQUIT] = 0; //undef
     tcsetattr(STDIN_FILENO, TCSANOW, &term);
 
     conio_oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -86,7 +89,7 @@ static inline int getch(void)
           return -1;
      }
 
-     return (ch==2)?3:ch; //ctrl+b map to ctrl+c
+     return ch;
 }
 
 

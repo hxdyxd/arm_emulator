@@ -127,12 +127,11 @@ void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val)
 }
 
 /*
- * exception_out
+ * reg_show
  * author:hxdyxd
  */
-static void exception_out(struct armv4_cpu_t *cpu)
+void reg_show(struct armv4_cpu_t *cpu)
 {
-    //return;
     uint8_t cur_mode  = get_cpu_mode_code(cpu);
     WARN("PC = 0x%x , code = %d\r\n", register_read(cpu, 15), cpu->code_counter);
     WARN("cpsr = 0x%x, %s\n", cpsr(cpu), string_register_mode[cur_mode]);
@@ -149,6 +148,15 @@ static void exception_out(struct armv4_cpu_t *cpu)
         WARN("R%2d = 0x%08x, ", 14, cpu->reg[i][14]);
         WARN("%s \n", string_register_mode[i]);
     }
+}
+
+/*
+ * exception_out
+ * author:hxdyxd
+ */
+static void exception_out(struct armv4_cpu_t *cpu)
+{
+    reg_show(cpu);
     ERROR("stop\n");
 }
 

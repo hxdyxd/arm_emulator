@@ -1,5 +1,7 @@
 # arm_emulator
 
+![C/C++ CI](https://github.com/hxdyxd/arm_emulator/workflows/C/C++%20CI/badge.svg)
+
 ## Introduction
 
 Simple armv4 emulator with embedded freertos and linux operating system support  

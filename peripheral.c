@@ -68,6 +68,19 @@ void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 /******************************memory*****************************************/
 
 /******************************fs*****************************************/
+void fs_exit(int s, void *base)
+{
+    struct fs_t *fs = base;
+#ifdef FS_MMAP_MODE
+    munmap(fs->map, fs->len);
+    close(fs->fd);
+#else
+    fclose(fs->fp);
+#endif
+    printf("Exit fs\n");
+}
+
+
 uint32_t fs_reset(void *base)
 {
     struct fs_t *fs = base;
@@ -87,8 +100,6 @@ uint32_t fs_reset(void *base)
             return ret;
         }
         ret = 1;
-        //munmap(fs->map, fs->len);
-        //close(fs->fd);
 #else
         fs->fp = fopen(fs->filename, "rb+");
         if(fs->fp == NULL) {
@@ -97,6 +108,7 @@ uint32_t fs_reset(void *base)
         }
         ret = 1;
 #endif
+        on_exit(fs_exit, base);
     }
     return ret;
 }

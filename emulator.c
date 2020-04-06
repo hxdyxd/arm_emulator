@@ -22,6 +22,7 @@
 #include <conio.h>
 
 #include <unistd.h>
+#include <signal.h>
 #include <slip_tun.h>
 
 
@@ -35,6 +36,8 @@
 #define MAX_FS_SIZE   (1 << 29)   //512M
 #endif
 
+
+static uint8_t step_by_step = 0;
 
 //peripheral register
 struct peripheral_t peripheral_reg_base = {
@@ -119,6 +122,13 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
 };
 
 
+static void enable_step_by_step(int sig)
+{
+    step_by_step = 1;
+    printf("\n[%s] step by step mode\n", step_by_step ? "x" : " ");
+}
+
+
 //load_program_memory reads the input memory, and populates the instruction 
 // memory
 uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uint32_t start)
@@ -132,7 +142,10 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
     }
     address = start;
     while(!feof(fp)) {
-        (void)fread(&instruction, 4, 1, fp);
+        if(fread(&instruction, 4, 1, fp) < 0) {
+            ERROR("Error fread mem file %s\n", file_name);
+            exit(-1);
+        }
         write_word(cpu, address, instruction);
         address = address + 4;
     }
@@ -170,6 +183,29 @@ void usage(const char *file)
 }
 
 
+void usage_s(void)
+{
+    printf("  usage:\n\n");
+    printf("  arm_emulator\n");
+    printf(
+        "       m                       Print MMU page table\n");
+    printf(
+        "       r [n]                   Run skip n step\n");
+    printf(
+        "       d                       Set/Clear debug message flag\n");
+    printf(
+        "       l                       Print TLB table\n");
+    printf(
+        "       g                       Print register table\n");
+    printf(
+        "       s                       Set step by step flag, prease ctrl+b to clear\n");
+    printf(
+        "       h                       Print this message\n");
+    printf(
+        "       q                       Quit program\n");
+}
+
+
 int main(int argc, char **argv)
 {
     struct armv4_cpu_t cpu_handle;
@@ -178,7 +214,6 @@ int main(int argc, char **argv)
     uint8_t mode = USE_BINARY;
     char *image_path = NULL;
     char *dtb_path = NULL;
-    uint8_t step_by_step = 0;
     int ch;
 
     peripheral_reg_base.fs.filename = NULL;
@@ -226,6 +261,10 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
+    signal(SIGINT, enable_step_by_step); //ctrl+b
+    kbhit();
+
+    atexit(slip_tun_exit);
     slip_tun_init();
     cpu_init(cpu);
     peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
@@ -296,9 +335,24 @@ int main(int argc, char **argv)
             case 'l':
                 tlb_show(&cpu->mmu);
                 break;
+            case 'g':
+                reg_show(cpu);
+                break;
+            case 's':
+                step_by_step = !step_by_step;
+                printf("[%s] step by step mode\n", step_by_step ? "x" : " ");
+                break;
+            case 'h':
+            case '?':
+                usage_s();
+                break;
             case 'q':
                 printf("quit\n");
                 exit(0);
+                break;
+            default:
+                printf("unknown option %c\n", cmd_str[0]);
+                usage_s();
                 break;
             }
             continue;

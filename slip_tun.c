@@ -29,6 +29,9 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
+#include <sys/time.h>
+#include <sys/select.h>
+#include <errno.h>
 #include <linux/if_tun.h>
 
 //struct ifreq ifr;
@@ -40,6 +43,7 @@
 
 
 int tun_out_task_start(void);
+int tun_out_task_stop(void);
 
 #define BUF_SIZE      (1800)
 #define FIFO_SIZE     (2048)
@@ -73,6 +77,11 @@ int slip_tun_init(void)
         return 0;
     }
     return 1;
+}
+
+void slip_tun_exit(void)
+{
+    tun_out_task_stop();
 }
 
 /* Non-blockable */
@@ -199,13 +208,11 @@ int slip_out_task_stop(void)
         slip_out_task_run_flag = 0;
         pthread_join(gs_slip_out_task_pthread_id, 0);
     } else {
-        ERROR_PRINTF("slip out task failed!\n");
+        ERROR_PRINTF("slip out task stop failed!\n");
         return -1;
     }
     return 0;
 }
-
-
 
 
 
@@ -214,24 +221,42 @@ void *tun_out_task_proc(void *par)
     int tun_fd = *(int *)par;
     prctl(PR_SET_NAME,"tun_out_task");
     DEBUG_PRINTF("tun out task enter success %d!\n", tun_fd);
-    while(tun_out_task_run_flag) {
-        int total_len = read(tun_fd, tun_out_buffer, BUF_SIZE);
-#if 0
-        DEBUG_PRINTF("TUN R=%d\n", total_len);
-#endif
-        if (total_len < 0) {
-            ERROR_PRINTF("Reading from interface error\n");
-            tun_out_task_run_flag =  0;
-            slip_out_task_stop();
-            close(tun_fd);
-            return NULL;
-        }
-        
-        send_packet(tun_out_buffer, total_len);
+    int maxsock = 0;
+    if(tun_fd > maxsock) {
+        maxsock = tun_fd;
     }
-    close(tun_fd);
+    
+    while(tun_out_task_run_flag) {
+        int r;
+        struct timeval timeout = {
+            .tv_sec = 1,
+            .tv_usec = 0,
+        };
+        fd_set readset;
+
+        FD_ZERO(&readset);
+        FD_SET(tun_fd, &readset);
+
+        r = select(maxsock + 1, &readset, NULL, NULL, &timeout);
+        if (r < 0) {
+            if(errno == EINTR)
+                continue;
+            ERROR_PRINTF("select error\n");
+            break;
+        }
+        if (FD_ISSET(tun_fd, &readset)) {
+            int total_len = read(tun_fd, tun_out_buffer, BUF_SIZE);
+            if (total_len < 0) {
+                ERROR_PRINTF("Reading from interface error\n");
+                break;
+            }
+            
+            send_packet(tun_out_buffer, total_len);
+        }
+    }
     tun_out_task_run_flag = 0;
     slip_out_task_stop();
+    close(tun_fd);
     DEBUG_PRINTF("tun out task exit!\n");
     return NULL;
 }
@@ -268,7 +293,7 @@ int tun_out_task_stop(void)
         tun_out_task_run_flag = 0;
         pthread_join(gs_tun_out_task_pthread_id, 0);
     } else {
-        ERROR_PRINTF("tun out task failed!\n");
+        ERROR_PRINTF("tun out task stop failed!\n");
         return -1;
     }
     return 0;
@@ -436,6 +461,10 @@ int recv_packet(unsigned char *p, int len)
 int slip_tun_init(void)
 {
     return 1;
+}
+
+void slip_tun_exit(void)
+{
 }
 
 int slip_tun_readable(void) 

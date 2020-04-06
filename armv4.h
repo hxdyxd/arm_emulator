@@ -177,7 +177,7 @@ void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link
 
 uint32_t register_read(struct armv4_cpu_t *cpu, uint8_t id);
 void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val);
-
+void reg_show(struct armv4_cpu_t *cpu);
 
 uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint8_t mmu, uint8_t mask);
 void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint32_t data,  uint8_t mask);
