@@ -19,7 +19,11 @@
 #include <stdlib.h>
 #include <armv4.h>
 #include <peripheral.h>
+#ifdef USE_WINAPI
 #include <conio.h>
+#else
+#include <conio_linux.h>
+#endif
 
 #include <unistd.h>
 #include <signal.h>
@@ -313,7 +317,8 @@ int main(int argc, char **argv)
                 while(!kbhit()) {
                     usleep(1000);
                 }
-                if((cmd_str[cmd_len] = getch()) == '\n')
+                cmd_str[cmd_len] = getch();
+                if(cmd_str[cmd_len] == '\n' || cmd_str[cmd_len] == '\r')
                     break;
                 putchar(cmd_str[cmd_len]);
             }

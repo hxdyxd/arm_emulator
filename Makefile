@@ -32,6 +32,11 @@ else
 	quiet =
 endif
 
+STATIC = 0
+ifeq ($(STATIC), 1)
+	LDFLAGS += -static
+endif
+
 all:$(TARGET)
 
 $(TARGET): $(OBJS)

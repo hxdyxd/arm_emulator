@@ -23,7 +23,7 @@ jobs:
 
     - name: Makefile
       run: |
-        make V=1
+        make V=1 STATIC=1
         ./armemulator -h
 
     - name: CMake
@@ -45,7 +45,7 @@ jobs:
 
     - name: Makefile
       run: |
-        make V=1 C_DEFS="-DFS_MMAP_MODE"
+        make V=1 STATIC=1 C_DEFS="-DFS_MMAP_MODE"
         ./armemulator -h
 
     - name: CMake
@@ -67,6 +67,5 @@ jobs:
 
     - name: Makefile
       run: |
-        move conio.h conio-unused.h
-        make V=1 C_DEFS=""
+        make V=1 STATIC=1 C_DEFS="-DUSE_WINAPI"
         ./armemulator -h
