@@ -72,20 +72,19 @@ static inline int kbhit(void)
 static inline int getch(void)
 {
      struct termios tm, tm_old;
-     int fd = 0, ch;
 
-     if (tcgetattr(fd, &tm) < 0) {
+     if (tcgetattr(STDIN_FILENO, &tm) < 0) {
           return -1;
      }
 
      tm_old = tm;
      cfmakeraw(&tm);
-     if (tcsetattr(fd, TCSANOW, &tm) < 0) {
+     if (tcsetattr(STDIN_FILENO, TCSANOW, &tm) < 0) {
           return -1;
      }
 
-     ch = getchar();
-     if (tcsetattr(fd, TCSANOW, &tm_old) < 0) {
+     int ch = getchar();
+     if (tcsetattr(STDIN_FILENO, TCSANOW, &tm_old) < 0) {
           return -1;
      }
 

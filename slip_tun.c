@@ -492,7 +492,6 @@ int slip_tun_writeable(void)
 
 int slip_tun_write(int ch)
 {
-    printf("%02x,", ch);
     return 0;
 }
 #endif /*TUN_SUPPORT*/

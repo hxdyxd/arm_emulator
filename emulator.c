@@ -160,7 +160,7 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
         write_word(cpu, address, instruction);
         address = address + 4;
     }
-    WARN("load mem base 0x%x, size %d\r\n", start, address - start - 4);
+    WARN("load mem base 0x%x, size %u\r\n", start, address - start - 4);
     fclose(fp);
     return address - start - 4;
 }
@@ -190,7 +190,8 @@ void usage(const char *file)
     printf(
         "       [-h, --help]               Print this message.\n");
     printf("\n");
-    printf("Reference: https://github.com/hxdyxd/arm_emulator\n");
+    printf("  Build , %s %s \n", __DATE__, __TIME__);
+    printf("  Reference: https://github.com/hxdyxd/arm_emulator\n");
 }
 
 
@@ -199,21 +200,23 @@ void usage_s(void)
     printf("  usage:\n\n");
     printf("  arm_emulator\n");
     printf(
-        "       m                       Print MMU page table\n");
+        "       m                Print MMU page table\n");
     printf(
-        "       r [n]                   Run skip n step\n");
+        "       r [n]            Run skip n step\n");
     printf(
-        "       d                       Set/Clear debug message flag\n");
+        "       d                Set/Clear debug message flag\n");
     printf(
-        "       l                       Print TLB table\n");
+        "       l                Print TLB table\n");
     printf(
-        "       g                       Print register table\n");
+        "       g                Print register table\n");
     printf(
-        "       s                       Set step by step flag, prease ctrl+b to clear\n");
+        "       s                Set step by step flag, prease ctrl+b to clear\n");
     printf(
-        "       h                       Print this message\n");
+        "       h                Print this message\n");
     printf(
-        "       q                       Quit program\n");
+        "       q                Quit program\n");
+    printf("\n");
+    printf("  Build , %s %s \n", __DATE__, __TIME__);
 }
 
 
@@ -310,19 +313,31 @@ int main(int argc, char **argv)
                 --skip_num;
                 goto RUN;
             }
-            printf("[%d] cmd>\n", cpu->code_counter);
             char cmd_str[64] = {0, };
             uint8_t cmd_len = 0;
-            for(cmd_len=0; cmd_len<64; cmd_len++) {
+            printf("\n[%u] cmd>", cpu->code_counter);
+            for(cmd_len=0; cmd_len<64;) {
                 while(!kbhit()) {
                     usleep(1000);
                 }
                 cmd_str[cmd_len] = getch();
-                if(cmd_str[cmd_len] == '\n' || cmd_str[cmd_len] == '\r')
-                    break;
-                putchar(cmd_str[cmd_len]);
+                if(cmd_str[cmd_len] == '\n' || cmd_str[cmd_len] == '\r') {
+                    cmd_str[cmd_len] = 0;
+                    if(cmd_len != 0)
+                        break;
+                    printf("\n[%u] cmd>", cpu->code_counter);
+                } else if(cmd_str[cmd_len] == 0x7f) {
+                    //delete
+                    if(cmd_len != 0)
+                        cmd_len--;
+                    cmd_str[cmd_len] = '\0'; //clear
+                    printf("\n[%u] cmd>%s", cpu->code_counter, cmd_str);
+                } else {
+                    putchar(cmd_str[cmd_len]);
+                    cmd_len++;
+                }
             }
-            cmd_str[cmd_len] = 0;
+            
             printf("\n");
             switch(cmd_str[0]) {
             case 'm':
@@ -364,8 +379,10 @@ int main(int argc, char **argv)
                 printf("quit\n");
                 exit(0);
                 break;
+            case '\0':
+                break;
             default:
-                printf("unknown option %c\n", cmd_str[0]);
+                printf("unknown option '%c', 0x%x\n", cmd_str[0], cmd_str[0]);
                 usage_s();
                 break;
             }

@@ -133,7 +133,7 @@ void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val)
 void reg_show(struct armv4_cpu_t *cpu)
 {
     uint8_t cur_mode  = get_cpu_mode_code(cpu);
-    WARN("PC = 0x%x , code = %d\r\n", register_read(cpu, 15), cpu->code_counter);
+    WARN("PC = 0x%x , code = %u\r\n", register_read(cpu, 15), cpu->code_counter);
     WARN("cpsr = 0x%x, %s\n", cpsr(cpu), string_register_mode[cur_mode]);
     WARN("User mode register:");
     for(int i=0; i<16; i++) {

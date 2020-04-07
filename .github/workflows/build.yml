@@ -45,7 +45,7 @@ jobs:
 
     - name: Makefile
       run: |
-        make V=1 STATIC=1 C_DEFS="-DFS_MMAP_MODE"
+        make V=1 C_DEFS="-DFS_MMAP_MODE"
         ./armemulator -h
 
     - name: CMake
