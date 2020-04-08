@@ -24,9 +24,14 @@ Simple armv4 emulator with embedded freertos and linux operating system support
 
 ## Usage Example
 
-> armemulator -ds -m bin -f hello.bin                             ;Run 'hello.bin' by step by step mode  
-> armemulator -m disassembly -f hello.bin                         ;Show assembly code of 'hello.bin'  
-> armemulator -m linux -f zImage -r rootfs.ext2                   ;Run linux kernel  
+Run 'hello.bin' by step by step mode  
+> armemulator -ds -m bin -f hello.bin  
+
+Show assembly code of 'hello.bin'  
+> armemulator -m disassembly -f hello.bin  
+
+Run linux kernel  
+> armemulator -m linux -f zImage -r rootfs.ext2  
 > armemulator -m linux -f Image -t arm-emulator.dtb -r rootfs.ext2  
 
 ## Usage
@@ -61,7 +66,7 @@ Step by step mode command:
        d                Set/Clear debug message flag
        l                Print TLB table
        g                Print register table
-       s                Set step by step flag, prease ctrl+b to clear
+       s                Set step by step flag, press ctrl+b to clear
        p[p|v] [a]       Print physical/virtual address at 0x[a]
        t                Print run time
        h                Print this message

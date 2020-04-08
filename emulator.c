@@ -239,7 +239,7 @@ void usage_s(void)
     printf(
         "       g                Print register table\n");
     printf(
-        "       s                Set step by step flag, prease ctrl+b to clear\n");
+        "       s                Set step by step flag, press ctrl+b to clear\n");
     printf(
         "       p[p|v] [a]       Print physical/virtual address at 0x[a]\n");
     printf(
