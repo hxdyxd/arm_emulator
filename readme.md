@@ -7,13 +7,14 @@
 Simple armv4 emulator with embedded freertos and linux operating system support  
 
 ## Currently supported features
-* All ARMv4 instructions
+* All ARMv4 instructions  
 * Interrupts (timer interrupt, 8250 serial interrupts)  
 * Prefetch Abort, Data Abort, Undefined instruction, IRQ ,FIQ exceptions  
 * CP15 coprocessor, Memory Management Unit(MMU) and Translation Lookaside Buffer(TLB)  
 * Network support via serial port and TUN/TAP devices for host  
 * Console support via serial port  
 * Step by step running  
+* Disassembler  
 
 ## Other codes
 * [arm-emulator-linux](https://github.com/hxdyxd/arm-emulator-linux), [arm-emulator-linux(gitee mirror)](https://gitee.com/hxdyxd/arm-emulator-linux)  
@@ -23,18 +24,20 @@ Simple armv4 emulator with embedded freertos and linux operating system support
 
 ## Usage Example
 
-> ./arm_emulator -m bin -f hello.bin  
-> ./arm_emulator -m bin -f hello.bin  
-> ./arm_emulator -m linux -f zImage -r rootfs.ext2  
-> ./arm_emulator -m linux -f Image -t arm-emulator.dtb -r rootfs.ext2  
+> armemulator -ds -m bin -f hello.bin                             ;Run 'hello.bin' by step by step mode  
+> armemulator -m disassembly -f hello.bin                         ;Show assembly code of 'hello.bin'  
+> armemulator -m linux -f zImage -r rootfs.ext2                   ;Run linux kernel  
+> armemulator -m linux -f Image -t arm-emulator.dtb -r rootfs.ext2  
 
 ## Usage
 
 ```
+./armemulator
+
   usage:
 
-  arm_emulator
-       -m <mode>                  Select 'linux' or 'bin' mode, default is 'bin'.
+  armemulator
+       -m <mode>                  Select 'linux', 'bin' or 'disassembly' mode, default is 'bin'.
        -f <image_path>            Set image or binary programme file path.
        [-r <romfs_path>]          Set ROM filesystem path.
        [-t <device_tree_path>]    Set Devices tree path.
@@ -44,13 +47,33 @@ Simple armv4 emulator with embedded freertos and linux operating system support
        [-v]                       Verbose mode.
        [-h, --help]               Print this message.
 
-Reference: https://github.com/hxdyxd/arm_emulator
+  Build , [time] 
+  Reference: https://github.com/hxdyxd/arm_emulator
+
+```
+Step by step mode command:  
+```
+  usage:
+
+  armemulator
+       m                Print MMU page table
+       r [n]            Run skip n step
+       d                Set/Clear debug message flag
+       l                Print TLB table
+       g                Print register table
+       s                Set step by step flag, prease ctrl+b to clear
+       p[p|v] [a]       Print physical/virtual address at 0x[a]
+       t                Print run time
+       h                Print this message
+       q                Quit program
+
+  Build , [time]
 ```
 
 ## Build armemulator
 
 ```
-CFLAGS=-static make
+make V=1 STATIC=1
 sudo make install
 ```
 

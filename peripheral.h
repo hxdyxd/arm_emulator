@@ -28,7 +28,7 @@
 #include <time.h>
 #include <stdlib.h>
 
-#define  GET_TICK()   (clock()*1000/CLOCKS_PER_SEC)
+#define  GET_TICK()   (uint32_t)(clock() / (CLOCKS_PER_SEC/1000))
 /*******HAL END*******/
 
 #ifndef MEM_SIZE

@@ -23,6 +23,7 @@ endif ()
 
 set(ARMEMULATOR_SOURSE
 		emulator.c
+		disassembly.c
 		armv4.c
 		peripheral.c
 		kfifo.c

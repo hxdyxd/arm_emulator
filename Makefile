@@ -9,6 +9,7 @@ TARGET = armemulator
 
 OBJS = \
 emulator.o\
+disassembly.o\
 armv4.o\
 peripheral.o\
 kfifo.o\

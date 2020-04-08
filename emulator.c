@@ -18,6 +18,7 @@
  */
 #include <stdlib.h>
 #include <armv4.h>
+#include <disassembly.h>
 #include <peripheral.h>
 #ifdef USE_WINAPI
 #include <conio.h>
@@ -30,8 +31,9 @@
 #include <slip_tun.h>
 
 
-#define USE_LINUX     0
-#define USE_BINARY    1
+#define USE_LINUX          0
+#define USE_BINARY         1
+#define USE_DISASSEMBLY    2
 
 #define IMAGE_LOAD_ADDRESS   (0x8000)
 #define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
@@ -148,21 +150,48 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
     unsigned int address, instruction;
     fp = fopen(file_name, "rb");
     if(fp == NULL) {
-        ERROR("Error opening input mem file %s\n", file_name);
+        printf("Error opening input mem file %s\n", file_name);
         exit(-1);
     }
     address = start;
     while(!feof(fp)) {
         if((ret = fread(&instruction, 4, 1, fp)) < 0) {
-            ERROR("Error fread mem file %s, %d\n", file_name, ret);
+            printf("Error fread mem file %s, %d\n", file_name, ret);
             exit(-1);
         }
         write_word(cpu, address, instruction);
         address = address + 4;
     }
-    WARN("load mem base 0x%x, size %u\r\n", start, address - start - 4);
+    printf("load mem base 0x%x, size %u\r\n", start, address - start - 4);
     fclose(fp);
     return address - start - 4;
+}
+
+
+uint32_t load_disassembly(const char *file_name)
+{
+    FILE *fp;
+    int ret = 0;
+    unsigned int address, instruction;
+    char code_buff[AS_CODE_LEN];
+    fp = fopen(file_name, "rb");
+    if(fp == NULL) {
+        printf("Error opening input mem file %s\n", file_name);
+        exit(-1);
+    }
+    address = 0;
+    while(!feof(fp)) {
+        if((ret = fread(&instruction, 4, 1, fp)) < 0) {
+            printf("Error fread mem file %s, %d\n", file_name, ret);
+            exit(-1);
+        }
+        code_disassembly(instruction, code_buff, AS_CODE_LEN);
+        printf("  %8x:      %08x      %s\n", address, instruction, code_buff);
+        address = address + 4;
+    }
+    printf("code size %u\n", address);
+    fclose(fp);
+    return address;
 }
 
 
@@ -171,9 +200,9 @@ void usage(const char *file)
     printf("\n");
     printf("%s\n\n", file);
     printf("  usage:\n\n");
-    printf("  arm_emulator\n");
+    printf("  armemulator\n");
     printf(
-        "       -m <mode>                  Select 'linux' or 'bin' mode, default is 'bin'.\n");
+        "       -m <mode>                  Select 'linux', 'bin' or 'disassembly' mode, default is 'bin'.\n");
     printf(
         "       -f <image_path>            Set image or binary programme file path.\n");
     printf(
@@ -198,7 +227,7 @@ void usage(const char *file)
 void usage_s(void)
 {
     printf("  usage:\n\n");
-    printf("  arm_emulator\n");
+    printf("  armemulator\n");
     printf(
         "       m                Print MMU page table\n");
     printf(
@@ -212,11 +241,56 @@ void usage_s(void)
     printf(
         "       s                Set step by step flag, prease ctrl+b to clear\n");
     printf(
+        "       p[p|v] [a]       Print physical/virtual address at 0x[a]\n");
+    printf(
+        "       t                Print run time\n");
+    printf(
         "       h                Print this message\n");
     printf(
         "       q                Quit program\n");
     printf("\n");
     printf("  Build , %s %s \n", __DATE__, __TIME__);
+}
+
+
+void print_addr(struct armv4_cpu_t *cpu, char *ps)
+{
+    uint32_t printaddr = 0;
+    char code_buff[AS_CODE_LEN];
+    switch(*ps++) {
+    case 'p':
+        while(*ps == ' ')
+            ps++;
+        if(sscanf(ps, "%x", &printaddr) == 1) {
+            uint32_t data = read_word_without_mmu(cpu, printaddr);
+            printf("p, *(0x%08x) = 0x%08x\n", printaddr, data);
+            code_disassembly(data, code_buff, AS_CODE_LEN);
+            printf("disassembly\n  %8x:      %08x      %s\n",
+             printaddr, data, code_buff);
+        }
+        break;
+    case 'v':
+        while(*ps == ' ')
+            ps++;
+        if(sscanf(ps, "%x", &printaddr) == 1) {
+            uint32_t data = read_word(cpu, printaddr);
+            if(!cpu->mmu.mmu_fault) {
+                printf("v, *(0x%08x) = 0x%08x\n", printaddr, data);
+                code_disassembly(data, code_buff, AS_CODE_LEN);
+                printf("disassembly\n  %8x:      %08x      %s\n",
+                 printaddr, data, code_buff);
+            } else {
+                printf("v, *(0x%08x) mmu fault, fsr=0x%x\n",
+                 printaddr, cp15_fsr(&cpu->mmu));
+            }
+        }
+        break;
+    default:
+        --ps;
+        printf("unknown option p'%c', 0x%x\n", *ps, *ps);
+        usage_s();
+        break;
+    }
 }
 
 
@@ -243,10 +317,12 @@ int main(int argc, char **argv)
             image_path = optarg;
             break;
         case 'm':
-            if(strcmp(optarg, "linux") == 0) {
+            if(optarg[0] == 'l' || strcmp(optarg, "linux") == 0) {
                 mode = USE_LINUX;
-            } else if(strcmp(optarg, "bin") == 0) {
+            } else if(optarg[0] == 'b' || strcmp(optarg, "bin") == 0) {
                 mode = USE_BINARY;
+            } else if(optarg[0] == 'd' || strcmp(optarg, "disassembly") == 0) {
+                mode = USE_DISASSEMBLY;
             } else {
                 printf("unknown mode option :%s\n", optarg);
                 usage(argv[0]);
@@ -273,6 +349,10 @@ int main(int argc, char **argv)
         printf("parameter error \n");
         usage(argv[0]);
         exit(-1);
+    }
+    if(USE_DISASSEMBLY == mode) {
+        load_disassembly(image_path);
+        exit(0);
     }
 
     signal(SIGINT, enable_step_by_step); //ctrl+b
@@ -315,6 +395,7 @@ int main(int argc, char **argv)
             }
             char cmd_str[64] = {0, };
             uint8_t cmd_len = 0;
+
             printf("\n[%u] cmd>", cpu->code_counter);
             for(cmd_len=0; cmd_len<64;) {
                 while(!kbhit()) {
@@ -332,6 +413,8 @@ int main(int argc, char **argv)
                         cmd_len--;
                     cmd_str[cmd_len] = '\0'; //clear
                     printf("\n[%u] cmd>%s", cpu->code_counter, cmd_str);
+                } else if(cmd_str[cmd_len] == '\033') {
+                    
                 } else {
                     putchar(cmd_str[cmd_len]);
                     cmd_len++;
@@ -339,7 +422,8 @@ int main(int argc, char **argv)
             }
             
             printf("\n");
-            switch(cmd_str[0]) {
+            char *ps = &cmd_str[0];
+            switch(*ps++) {
             case 'm':
                 printf("MMU table base: 0x%08x\n", cpu->mmu.reg[2]);
                 for(int i=0; i<4096; i++) {
@@ -350,26 +434,34 @@ int main(int argc, char **argv)
                 }
                 printf("\n-----------MMU table end--------------\n");
                 break;
+            case 'd':
+                global_debug_flag = !global_debug_flag;
+                printf("[%s] debug info\n", global_debug_flag ? "x" : " ");
+                break;
+            case 'g':
+                reg_show(cpu);
+                break;
+            case 'l':
+                tlb_show(&cpu->mmu);
+                break;
+            case 'p':
+                print_addr(cpu, ps);
+                break;
             case 'r':
-                if(sscanf(cmd_str, "r %d", &skip_num) != 1) {
+                while(*ps == ' ')
+                    ps++;
+                if(sscanf(ps, "%d", &skip_num) != 1) {
                     skip_num = 0;
                 }
                 printf("skip %d ...\n", skip_num);
                 goto RUN;
                 break;
-            case 'd':
-                global_debug_flag = !global_debug_flag;
-                printf("[%s] debug info\n", global_debug_flag ? "x" : " ");
-                break;
-            case 'l':
-                tlb_show(&cpu->mmu);
-                break;
-            case 'g':
-                reg_show(cpu);
-                break;
             case 's':
                 step_by_step = !step_by_step;
                 printf("[%s] step by step mode\n", step_by_step ? "x" : " ");
+                break;
+            case 't':
+                printf("Run time: %u ms\n", GET_TICK());
                 break;
             case 'h':
             case '?':

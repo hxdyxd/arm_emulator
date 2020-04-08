@@ -94,33 +94,8 @@ struct armv4_cpu_t {
 #define   CPU_MODE_Mon       6
 
     struct decoder_t {
-        uint8_t code_type;
-#define  code_type_swi      1
-#define  code_type_b        2
-#define  code_type_ldm      3
-#define  code_type_ldr1     4
-#define  code_type_ldr0     5
-#define  code_type_dp2      6
-#define  code_type_msr1     7
-#define  code_type_ldrsh1   8
-#define  code_type_ldrsh0   9
-#define  code_type_ldrsb1  10
-#define  code_type_ldrsb0  11
-#define  code_type_ldrh1   12
-#define  code_type_ldrh0   13
-#define  code_type_swp     14
-#define  code_type_multl   15
-#define  code_type_mult    16
-#define  code_type_dp1     17
-#define  code_type_bx      18
-#define  code_type_dp0     19
-#define  code_type_msr0    20
-#define  code_type_mrs     21
-#define  code_type_mcr     22
-#define  code_type_clz     23
-#define  code_type_unknow  255
-
         uint32_t instruction_word;
+        uint8_t code_type;
         uint8_t event_id;
 #define EVENT_ID_IDLE      (0)
 #define EVENT_ID_UNDEF     (1)
@@ -132,6 +107,25 @@ struct armv4_cpu_t {
     struct mmu_t {
         uint32_t reg[16];
         uint8_t mmu_fault;
+#define   cp15_ctl(mmu)            (mmu)->reg[1]
+#define   cp15_ttb(mmu)            (mmu)->reg[2]
+#define   cp15_domain(mmu)         (mmu)->reg[3]
+/* Fault Status Register, [7:4]domain  [3:0]status */
+#define   cp15_fsr(mmu)            (mmu)->reg[5]
+/* Fault Address Register */
+#define   cp15_far(mmu)            (mmu)->reg[6]
+
+
+//mmu enable
+#define  cp15_ctl_m(mmu)  IS_SET(cp15_ctl(mmu), 0)
+//Alignment fault checking
+#define  cp15_ctl_a(mmu)  IS_SET(cp15_ctl(mmu), 1)
+//System protection bit
+#define  cp15_ctl_s(mmu)  IS_SET(cp15_ctl(mmu), 8)
+//ROM protection bit
+#define  cp15_ctl_r(mmu)  IS_SET(cp15_ctl(mmu), 9)
+//high vectors
+#define  cp15_ctl_v(mmu)  IS_SET(cp15_ctl(mmu), 13)
 
         struct tlb_t tlb[2][TLB_SIZE];
         struct tlb_t *tlb_base;
@@ -139,7 +133,13 @@ struct armv4_cpu_t {
         uint32_t tlb_total;
 #define TLB_D   (0)
 #define TLB_I   (1)
+
+/*
+ *s:TLB_D,TLB_I
+ */
+#define tlb_set_base(mmu,s)  (mmu)->tlb_base = (mmu)->tlb[s]
     }mmu;
+
 
     struct peripheral_extern_t {
         uint32_t number;
@@ -158,6 +158,86 @@ struct armv4_cpu_t {
     uint32_t code_counter;
 };
 
+/*
+ * get_cpu_mode_code
+ * author:hxdyxd
+ */
+static uint8_t get_cpu_mode_code(struct armv4_cpu_t *cpu)
+{
+    uint8_t cpu_mode = 0;
+    switch(cpsr_m(cpu)) {
+    case CPSR_M_USR:
+    case CPSR_M_SYS:
+        cpu_mode = CPU_MODE_USER; //0
+        break;
+    case CPSR_M_FIQ:
+        cpu_mode = CPU_MODE_FIQ; //1
+        break;
+    case CPSR_M_IRQ:
+        cpu_mode = CPU_MODE_IRQ; //2
+        break;
+    case CPSR_M_SVC:
+        cpu_mode = CPU_MODE_SVC;  //3
+        break;
+    case CPSR_M_MON:
+        cpu_mode = CPU_MODE_Mon;  //6
+        break;
+    case CPSR_M_ABT:
+        cpu_mode = CPU_MODE_Abort;  //5
+        break;
+    case CPSR_M_UND:
+        cpu_mode = CPU_MODE_Undef;  //4
+        break;
+    default:
+        cpu_mode = 0;
+        ERROR("cpu mode is unknown %x\r\n", cpsr_m(cpu));
+    }
+    return cpu_mode;
+}
+
+#define register_read_user_mode(cpu,id)  cpu->reg[0][id]
+#define register_write_user_mode(cpu,id,v)  cpu->reg[0][id] = v
+
+/*
+ * register_read
+ * author:hxdyxd
+ */
+static inline uint32_t register_read(struct armv4_cpu_t *cpu, uint8_t id)
+{
+    //Register file
+    if(id < 8) {
+        return cpu->reg[CPU_MODE_USER][id];
+    } else if(id == 15) {
+        return cpu->reg[CPU_MODE_USER][id] + 4;
+    } else if(cpsr_m(cpu) == CPSR_M_USR || cpsr_m(cpu) == CPSR_M_SYS) {
+        return cpu->reg[CPU_MODE_USER][id];
+    } else if(cpsr_m(cpu) != CPSR_M_FIQ && id < 13) {
+        return cpu->reg[CPU_MODE_USER][id];
+    } else {
+        PRINTF("<%x>", cpsr_m(cpu));
+        return cpu->reg[get_cpu_mode_code(cpu)][id];
+    }
+}
+
+/*
+ * register_write
+ * author:hxdyxd
+ */
+static inline void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val)
+{
+    //Register file
+    if(id < 8 || id == 15) {
+        cpu->reg[CPU_MODE_USER][id] = val;
+    } else if(cpsr_m(cpu) == CPSR_M_USR || cpsr_m(cpu) == CPSR_M_SYS) {
+        cpu->reg[CPU_MODE_USER][id] = val;
+    } else if(cpsr_m(cpu) != CPSR_M_FIQ && id < 13) {
+        cpu->reg[CPU_MODE_USER][id] = val;
+    } else {
+        PRINTF("<%x>", cpsr_m(cpu));
+        cpu->reg[get_cpu_mode_code(cpu)][id] = val;
+    }
+}
+
 
 /*
  *  interrupt_exception
@@ -175,8 +255,6 @@ void fetch(struct armv4_cpu_t *cpu);
 void decode(struct armv4_cpu_t *cpu);
 void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link, int number);
 
-uint32_t register_read(struct armv4_cpu_t *cpu, uint8_t id);
-void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val);
 void reg_show(struct armv4_cpu_t *cpu);
 
 uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, uint8_t mmu, uint8_t mask);
@@ -203,7 +281,7 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address, ui
 #define  write_halfword_mode(cpu,m,a,d)     write_mem(cpu,m,a,(d)&0xffff,1)
 #define  write_byte_mode(cpu,m,a,d)         write_mem(cpu,m,a,(d)&0xff,0)
 
-/* mmu */
+/* debug */
 void tlb_show(struct mmu_t *mmu);
 
 #endif

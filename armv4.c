@@ -17,6 +17,8 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include <armv4.h>
+#include <disassembly.h>
+
 
 #define  BSET(b)  (1<<(b))
 #define  BMASK(v,m,r)  (((v)&(m)) == (r))
@@ -31,100 +33,8 @@ const char *string_register_mode[7] = {
     "Abort",
     "Mon",
 };
-const char *opcode_table[16] = {
-    "AND", "EOR", "SUB", "RSB", 
-    "ADD", "ADC", "SBC", "RSC", 
-    "TST", "TEQ", "CMP", "CMN", 
-    "ORR", "MOV", "BIC", "MVN"
-};
-const char *shift_table[4] = {
-    "LSL", //00
-    "LSR", //01
-    "ASR", //10
-    "ROR", //11
-};
+
 uint8_t global_debug_flag = 0;
-
-/*
- * get_cpu_mode_code
- * author:hxdyxd
- */
-static uint8_t get_cpu_mode_code(struct armv4_cpu_t *cpu)
-{
-    uint8_t cpu_mode = 0;
-    switch(cpsr_m(cpu)) {
-    case CPSR_M_USR:
-    case CPSR_M_SYS:
-        cpu_mode = CPU_MODE_USER; //0
-        break;
-    case CPSR_M_FIQ:
-        cpu_mode = CPU_MODE_FIQ; //1
-        break;
-    case CPSR_M_IRQ:
-        cpu_mode = CPU_MODE_IRQ; //2
-        break;
-    case CPSR_M_SVC:
-        cpu_mode = CPU_MODE_SVC;  //3
-        break;
-    case CPSR_M_MON:
-        cpu_mode = CPU_MODE_Mon;  //6
-        break;
-    case CPSR_M_ABT:
-        cpu_mode = CPU_MODE_Abort;  //5
-        break;
-    case CPSR_M_UND:
-        cpu_mode = CPU_MODE_Undef;  //4
-        break;
-    default:
-        cpu_mode = 0;
-        ERROR("cpu mode is unknown %x\r\n", cpsr_m(cpu));
-    }
-    return cpu_mode;
-}
-
-
-#define register_read_user_mode(cpu,id)  cpu->reg[0][id]
-#define register_write_user_mode(cpu,id,v)  cpu->reg[0][id] = v
-
-/*
- * register_read
- * author:hxdyxd
- */
-uint32_t register_read(struct armv4_cpu_t *cpu, uint8_t id)
-{
-    //Register file
-    if(id < 8) {
-        return cpu->reg[CPU_MODE_USER][id];
-    } else if(id == 15) {
-        return cpu->reg[CPU_MODE_USER][id] + 4;
-    } else if(cpsr_m(cpu) == CPSR_M_USR || cpsr_m(cpu) == CPSR_M_SYS) {
-        return cpu->reg[CPU_MODE_USER][id];
-    } else if(cpsr_m(cpu) != CPSR_M_FIQ && id < 13) {
-        return cpu->reg[CPU_MODE_USER][id];
-    } else {
-        PRINTF("<%x>", cpsr_m(cpu));
-        return cpu->reg[get_cpu_mode_code(cpu)][id];
-    }
-}
-
-/*
- * register_write
- * author:hxdyxd
- */
-void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val)
-{
-    //Register file
-    if(id < 8 || id == 15) {
-        cpu->reg[CPU_MODE_USER][id] = val;
-    } else if(cpsr_m(cpu) == CPSR_M_USR || cpsr_m(cpu) == CPSR_M_SYS) {
-        cpu->reg[CPU_MODE_USER][id] = val;
-    } else if(cpsr_m(cpu) != CPSR_M_FIQ && id < 13) {
-        cpu->reg[CPU_MODE_USER][id] = val;
-    } else {
-        PRINTF("<%x>", cpsr_m(cpu));
-        cpu->reg[get_cpu_mode_code(cpu)][id] = val;
-    }
-}
 
 /*
  * reg_show
@@ -164,33 +74,8 @@ static void exception_out(struct armv4_cpu_t *cpu)
 /*************cp15************/
 static inline void tlb_invalidata(struct mmu_t *mmu, uint32_t vaddr,
  uint8_t CRm, uint8_t op2);
-static int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap,
+static inline int mmu_check_access_permissions(struct mmu_t *mmu, uint8_t ap,
  uint8_t privileged, uint8_t wr);
-
-#define   cp15_ctl(mmu)            (mmu)->reg[1]
-#define   cp15_ttb(mmu)            (mmu)->reg[2]
-#define   cp15_domain(mmu)         (mmu)->reg[3]
-/* Fault Status Register, [7:4]domain  [3:0]status */
-#define   cp15_fsr(mmu)            (mmu)->reg[5]
-/* Fault Address Register */
-#define   cp15_far(mmu)            (mmu)->reg[6]
-
-
-//mmu enable
-#define  cp15_ctl_m(mmu)  IS_SET(cp15_ctl(mmu), 0)
-//Alignment fault checking
-#define  cp15_ctl_a(mmu)  IS_SET(cp15_ctl(mmu), 1)
-//System protection bit
-#define  cp15_ctl_s(mmu)  IS_SET(cp15_ctl(mmu), 8)
-//ROM protection bit
-#define  cp15_ctl_r(mmu)  IS_SET(cp15_ctl(mmu), 9)
-//high vectors
-#define  cp15_ctl_v(mmu)  IS_SET(cp15_ctl(mmu), 13)
-
-/*
- *s:TLB_D,TLB_I
- */
-#define tlb_set_base(mmu,s)  (mmu)->tlb_base = (mmu)->tlb[s]
 
 
 static inline uint32_t cp15_read(struct mmu_t *mmu, uint8_t CRn, uint8_t CRm,
@@ -597,7 +482,7 @@ uint32_t read_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
         return cpu->code_counter;
     }
     
-    WARN("mem overflow error, read 0x%x\r\n", address);
+    WARN("address error, read 0x%x\r\n", address);
     exception_out(cpu);
     return 0xffffffff;
 }
@@ -629,9 +514,10 @@ void write_mem(struct armv4_cpu_t *cpu, uint8_t privileged, uint32_t address,
         return;
     }
 
-    WARN("mem error, write %d = 0x%0x\r\n", mask, address);
+    WARN("address error, write 0x%0x\r\n", address);
     exception_out(cpu);
 }
+
 
 /*
  * uint8_t type:
@@ -731,7 +617,7 @@ void fetch(struct armv4_cpu_t *cpu)
     tlb_set_base(&cpu->mmu, TLB_I);
     cpu->decoder.instruction_word = read_word(cpu, pc_val);
     tlb_set_base(&cpu->mmu, TLB_D);
-    PRINTF("[0x%04x]: ", pc_val);
+    PRINTF("\t%x:    %08x    ", pc_val, cpu->decoder.instruction_word);
     register_write(cpu, 15, pc_val + 4 ); //current pc_val add 4
     if(mmu_check_status(&cpu->mmu)) {
         cpu->decoder.event_id = EVENT_ID_PREAABT;
@@ -768,12 +654,12 @@ void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link
 #define SHIFTS_MODE_REGISTER          (2)
 #define SHIFTS_MODE_32BIT_IMMEDIATE   (3)
 
-static uint8_t shifter(struct armv4_cpu_t *cpu, uint32_t *op, const uint8_t rot_num,
- const uint8_t shift, const uint8_t shifts_mode)
+static inline uint8_t shifter(struct armv4_cpu_t *cpu, uint32_t *op, const uint8_t rot_num,
+ const uint8_t type, const uint8_t shifts_mode)
 {
     uint8_t shifter_carry_out = 0;
     uint32_t operand2 = *op;
-    switch(shift) {
+    switch(type) {
     case 0:
         //LSL
         //5.1.4, 5.1.5, 5.1.6
@@ -909,10 +795,17 @@ static uint8_t shifter(struct armv4_cpu_t *cpu, uint32_t *op, const uint8_t rot_
 #define ALU_MODE_ADD     (1)
 #define ALU_MODE_SUB     (0)
 
-#define adder(op1,op2,m)  ((m==ALU_MODE_ADD)?(op1)+(op2):(op1)-(op2))
+#define _adder(op1,op2,m)  ((m==ALU_MODE_ADD)?(op1)+(op2):(op1)-(op2))
+
+static inline uint32_t adder(const uint32_t op1, const uint32_t op2, const uint8_t add_mode)
+{
+    PRINTF("[ALU]op1: 0x%x, sf_op2: 0x%x, out: 0x%x, ",
+         op1, op2, _adder(op1, op2, add_mode));
+    return _adder(op1, op2, add_mode);
+}
 
 
-static uint32_t adder_with_carry(const uint32_t op1, const uint32_t op2,
+static inline uint32_t adder_with_carry(const uint32_t op1, const uint32_t op2,
  const uint32_t carry, const uint8_t add_mode, uint8_t *bit_cy, uint8_t *bit_ov)
 {
     uint32_t sum_middle = 0, cy_high_bits = 0;
@@ -945,478 +838,8 @@ static uint32_t adder_with_carry(const uint32_t op1, const uint32_t op2,
 //******************decode**************************
 //**************************************************
 
-struct ins_dp_immediate_shift {
-    uint32_t Rm:4;
-    uint32_t bit4:1; //0
-    uint32_t shift:2;
-    uint32_t shift_amount:5;
-    uint32_t Rd:4;
-    uint32_t Rn:4;
-    uint32_t S:1;
-    uint32_t opcode:4;
-    uint32_t f:3; //0
-    uint32_t cond:4;
-};
 
-struct ins_dp_register_shift {
-    uint32_t Rm:4;
-    uint32_t bit4:1; //1
-    uint32_t shift:2;
-    uint32_t bit7:1; //0
-    uint32_t Rs:4;
-    uint32_t Rd:4;
-    uint32_t Rn:4;
-    uint32_t S:1;
-    uint32_t opcode:4;
-    uint32_t f:3; //0
-    uint32_t cond:4;
-};
-
-struct ins_dp_immediate {
-    uint32_t immediate:8;
-    uint32_t rotate:4;
-    uint32_t Rd:4;
-    uint32_t Rn:4;
-    uint32_t S:1;
-    uint32_t opcode:4;
-    uint32_t f:3; //1
-    uint32_t cond:4;
-};
-
-struct ins_ldr_immediate_offset {
-    uint32_t immediate:12;
-    uint32_t Rd:4;
-    uint32_t Rn:4;
-    uint32_t L:1;
-    uint32_t W:1;
-    uint32_t B:1;
-    uint32_t U:1;
-    uint32_t P:1;
-    uint32_t f:3; //2
-    uint32_t cond:4;
-};
-
-struct ins_ldr_register_offset {
-    uint32_t Rm:4;
-    uint32_t bit4:1;
-    uint32_t shift:2;
-    uint32_t shift_amount:5;
-    uint32_t Rd:4;
-    uint32_t Rn:4;
-    uint32_t L:1;
-    uint32_t W:1;
-    uint32_t B:1;
-    uint32_t U:1;
-    uint32_t P:1;
-    uint32_t f:3; //3
-    uint32_t cond:4;
-};
-
-struct ins_ldm {
-    uint32_t list:16;
-    uint32_t Rn:4;
-    uint32_t L:1;
-    uint32_t W:1;
-    uint32_t S:1;
-    uint32_t U:1;
-    uint32_t P:1;
-    uint32_t f:3; //4
-    uint32_t cond:4;
-};
-
-struct ins_b {
-    uint32_t offset22_0:23;
-    uint32_t offset23:1;
-    uint32_t L:1;
-    uint32_t f:3; //5
-    uint32_t cond:4;
-};
-
-struct ins_swi {
-    uint32_t number:24;
-    uint32_t bit24:1;
-    uint32_t f:3; //5
-    uint32_t cond:4;
-};
-
-struct ins_mcr {
-    uint32_t CRm:4;
-    uint32_t bit4:1; //1
-    uint32_t opcode2:3;
-    uint32_t cp_num:4;
-    uint32_t Rd:4;
-    uint32_t CRn:4;
-    uint32_t bit20:1; //0
-    uint32_t opcode1:4;
-    uint32_t f:3; //7
-    uint32_t cond:4;
-};
-
-struct ins_bit {
-    uint32_t bit3_0:4;
-    uint32_t bit4:1;
-    uint32_t bit5:1;
-    uint32_t bit6:1;
-    uint32_t bit7:1;
-    uint32_t bit19_8:12;
-    uint32_t bit20:1;
-    uint32_t bit21:1;
-    uint32_t bit22:1;
-    uint32_t bit24_23:2;
-    uint32_t bit31_25:7;
-};
-
-
-union ins_t {
-    uint32_t word;
-    struct ins_dp_immediate_shift    dp_is;
-    struct ins_dp_register_shift     dp_rs;
-    struct ins_dp_immediate          dp_i;
-    struct ins_ldr_immediate_offset  ldr_i;
-    struct ins_ldr_register_offset   ldr_r;
-    struct ins_ldm                   ldm;
-    struct ins_b                     b;
-    struct ins_swi                   swi;
-    struct ins_mcr                   mcr;
-    struct ins_bit                   _bit;
-};
-
-#define opcode        (ins.dp_is.opcode)
-#define Bit4          (ins._bit.bit4)
-#define Bit5          (ins._bit.bit5)
-#define Bit6          (ins._bit.bit6)
-#define Bit7          (ins._bit.bit7)
-#define Bit20         (ins._bit.bit20)
-#define Bit21         (ins._bit.bit21)
-#define Bit22         (ins._bit.bit22)
-#define Bit24_23      (ins._bit.bit24_23)
-#define Rm            (ins.dp_rs.Rm)
-#define Rn            (ins.dp_rs.Rn)
-#define Rd            (ins.dp_rs.Rd)
-#define Rs            (ins.dp_rs.Rs)
-#define shift_amount  (ins.dp_is.shift_amount)
-#define shift         (ins.dp_is.shift)
-#define rotate_imm    (ins.dp_i.rotate)
-#define Pf            (ins.ldr_r.P) //ldr,ldm
-#define Uf            (ins.ldr_r.U) //ldr,ldm
-#define Bf            (ins.ldr_r.B) //ldr,swp
-#define Wf            (ins.ldr_r.W) //ldr,ldm
-#define Lf            (ins.ldr_r.L) //ldr,ldm
-#define Lf_b          (ins.b.L) //b
-#define Lf_bx         (Bit5)  //bx
-
-#define immediate_i       (ins.dp_i.immediate)
-#define immediate_ldr     (ins.ldr_i.immediate)
-#define immediate_extldr  ((Rs << 4) | Rm)
-#define immediate_b       (((ins.b.offset23) ? (ins.b.offset22_0 | 0xFF800000) : (ins.b.offset22_0)) << 2)
-
-
-static uint8_t code_decoder(const union ins_t ins)
-{
-    uint8_t code_type = code_type_unknow;
-    switch(ins.dp_is.f) {
-    case 0:
-        switch(Bit4) {
-        case 0:
-            if( (Bit24_23 == 2 ) && !Bit20 ) {
-                //Miscellaneous instructions
-                if(Bit21 && !Bit7) {
-                    code_type = code_type_msr0;
-                } else if(!Bit21 && !Bit7) {
-                    code_type = code_type_mrs;
-                } else {
-                    //ERROR("undefined bit7 error \r\n");
-                }
-            } else {
-                //Data processing register shift by immediate
-                code_type = code_type_dp0;
-            }
-            break;
-        case 1:
-            switch(Bit7) {
-            case 0:
-                if( (Bit24_23 == 2 ) && !Bit20 ) {
-                    //Miscellaneous instructions
-                    if(!Bit22 && Bit21 && !Bit6 ) {
-                        //Branch/exchange
-                        code_type = code_type_bx;
-                    } else if(Bit6 && !Bit5 ) {
-                        //Enhanced DSP add/subtracts
-                        //ERROR("Enhanced DSP add/subtracts R%d\r\n", Rm);
-                    } else if(Bit6 && Bit5) {
-                        //Software breakpoint
-                        //ERROR("Software breakpoint \r\n");
-                    } else if(!Bit6 && !Bit5 && opcode == 0xb) {
-                        //Count leading zero
-                        code_type = code_type_clz;
-                        //ERROR("Count leading zero \r\n");
-                    } else {
-                        //ERROR("Undefed Miscellaneous instructions\r\n");
-                    }
-                } else {
-                    //Data processing register shift by register
-                    code_type = code_type_dp1;
-                }
-                break;
-            case 1:
-                //Multiplies, extra load/storesss
-                switch(shift) {
-                case 0:
-                    if(Bit24_23 == 0) {
-                        code_type = code_type_mult;
-                    } else if(Bit24_23 == 1) {
-                        code_type = code_type_multl;
-                    } else if(Bit24_23 == 2 && !Bit20 && !Bit21) {
-                        code_type = code_type_swp;
-                    }
-                    break;
-                case 1:
-                    //code_type_ldrh
-                    if(Bit22) {
-                        code_type = code_type_ldrh1;
-                    } else {
-                        code_type = code_type_ldrh0;
-                    }
-                    break;
-                case 2:
-                    //code_type_ldrsb
-                    if(Bit22) {
-                        code_type = code_type_ldrsb1;
-                    } else {
-                        code_type = code_type_ldrsb0;
-                    }
-                    if(!Lf) {
-                        code_type = code_type_unknow;
-                        //ERROR("undefed LDRD\r\n");
-                    }
-                    break;
-                case 3:
-                    //code_type_ldrsh
-                    if(Bit22) {
-                        code_type = code_type_ldrsh1;
-                    } else {
-                        code_type = code_type_ldrsh0;
-                    }
-                    if(!Lf) {
-                        code_type = code_type_unknow;
-                        //ERROR("undefed STRD\r\n");
-                    }
-                    break;
-                default:
-                    ;
-                    //ERROR("undefed shift\r\n");
-                }
-                break;
-            default:
-                ;
-                //ERROR("undefed Bit7\r\n");
-            }
-            break;
-        default:
-            ;
-            //ERROR("undefed Bit4\r\n");
-        }
-        break;
-    case 1:
-        //Data processing immediate and move immediate to status register
-        if( (opcode == 0x9 || opcode == 0xb ) && !Bit20 ) {
-            code_type = code_type_msr1;
-        } else if( (opcode == 0x8 || opcode == 0xa ) && !Bit20 ) {
-            //PRINTF("undefined instruction\r\n");
-        } else {
-            //Data processing immediate
-            code_type = code_type_dp2;
-        }
-        break;
-    case 2:
-        //load/store immediate offset
-        code_type = code_type_ldr0;
-        break;
-    case 3:
-        //load/store register offset
-        if(!ins.ldr_r.bit4) {
-            code_type = code_type_ldr1;
-        } else {
-            //ERROR("undefined instruction\r\n");
-        }
-        break;
-    case 4:
-        //load/store multiple
-        code_type = code_type_ldm;
-        break;
-    case 5:
-        //branch
-        code_type = code_type_b;
-        break;
-    case 6:
-        //Coprocessor load/store and double register transfers
-        //ERROR("Coprocessor todo... \r\n");
-        break;
-    case 7:
-        //software interrupt
-        if(ins.swi.bit24) {
-            code_type = code_type_swi;
-        } else {
-            if(Bit4) {
-                //Coprocessor move to register
-                code_type = code_type_mcr;
-            } else {
-                //ERROR("Coprocessor data processing todo... \r\n");
-            }
-        }
-        break;
-    }
-    return code_type;
-}
-
-
-static void code_debug(const union ins_t ins, const uint8_t code_type)
-{
-    switch(code_type) {
-    case code_type_msr0:
-        PRINTF("msr0 %sPSR_%d  R%d\r\n", Bit22?"S":"C", Rn, Rm);
-        break;
-    case code_type_mrs:
-        PRINTF("mrs R%d %s\r\n", Rd, Bit22?"SPSR":"CPSR");
-        break;
-    case code_type_dp0:
-        PRINTF("dp0 %s dst register R%d,"
-            " first operand R%d, Second operand R%d %s immediate #0x%x\r\n",
-             opcode_table[opcode], Rd,
-              Rn, Rm, shift_table[shift], shift_amount);
-        break;
-    case code_type_bx:
-        PRINTF("bx B%sX R%d\r\n", Lf_bx?"L":"", Rm);
-        break;
-    case code_type_dp1:
-        PRINTF("dp1 %s dst register R%d,"
-            " first operand R%d, Second operand R%d %s R%d\r\n",
-            opcode_table[opcode], Rd,
-             Rn, Rm, shift_table[shift], Rs);
-        break;
-    case code_type_mult:
-        if( IS_SET(ins.word, 21) ) {
-            PRINTF("mult MUA%s R%d <= R%d * R%d + R%d\r\n",
-             Bit20?"S":"", Rn, Rm, Rs, Rd);
-        } else {
-            PRINTF("mult MUL%s R%d <= R%d * R%d\r\n", Bit20?"S":"", Rn, Rm, Rs);
-        }
-        break;
-    case code_type_multl:
-        PRINTF("multl %sM%s [R%d L, R%d H] %s= R%d * R%d\r\n", Bit22?"S":"U",
-            IS_SET(ins.word, 21)?"LAL":"ULL", Rd, Rn, Bit21?"+":"", Rm, Rs);
-        break;
-    case code_type_swp:
-        PRINTF("swp SWP%s\r\n", Bf?"B":"");
-        break;
-    case code_type_ldrh1:
-        if(Pf) {
-            PRINTF("ldrh1 %sH R%d, [R%d, immediate %s#%d] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
-        } else {
-            PRINTF("ldrh1 %sH R%d, [R%d], immediate %s#%d %s\r\n",
-            Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
-        }
-        break;
-    case code_type_ldrh0:
-        if(Pf) {
-            PRINTF("ldrh0 %sH R%d, [R%d, %s[R%d] ] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-        } else {
-            PRINTF("ldrh0 %sH R%d, [R%d], %s[R%d] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-        }
-        break;
-    case code_type_ldrsb1:
-        if(Pf) {
-            PRINTF("ldrsb1 %sSB R%d, [R%d, immediate %s#%d] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
-        } else {
-            PRINTF("ldrsb1 %sSB R%d, [R%d], immediate %s#%d %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
-        }
-        break;
-    case code_type_ldrsb0:
-        if(Pf) {
-            PRINTF("ldrsb0 %sSB R%d, [R%d, %s[R%d] ] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-        } else {
-            PRINTF("ldrsb0 %sSB R%d, [R%d], %s[R%d] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-        }
-        break;
-    case code_type_ldrsh1:
-        if(Pf) {
-            PRINTF("ldrsh1 %sSH R%d, [R%d, immediate %s#%d] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
-        } else {
-            PRINTF("ldrsh1 %sSH R%d, [R%d], immediate %s#%d %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", immediate_extldr, Wf?"!":"");
-        }
-        break;
-    case code_type_ldrsh0:
-        if(Pf) {
-            PRINTF("ldrsh0 %sSH R%d, [R%d, %s[R%d] ] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-        } else {
-            PRINTF("ldrsh0 %sSH R%d, [R%d], %s[R%d] %s\r\n",
-             Lf?"LDR":"STR", Rd, Rn, Uf?"+":"-", Rm, Wf?"!":"");
-        }
-        break;
-    case code_type_msr1:
-        PRINTF("msr1 MSR %sPSR_%d  immediate [#%d ROR %d]\r\n",
-         Bit22?"S":"C", Rn, immediate_i, rotate_imm*2);
-        break;
-    case code_type_dp2:
-        PRINTF("dp2 %s dst register R%d,"
-        " first operand R%d, Second operand immediate [#%d ROR %d]\r\n",
-         opcode_table[opcode], Rd,
-          Rn, immediate_i, rotate_imm*2);
-        break;
-    case code_type_ldr0:
-        if(Pf) {
-            PRINTF("ldr0 %s%s dst register R%d,"
-            " [base address at R%d, Second address immediate #%s0x%x] %s\r\n",
-             Lf?"LDR":"STR", Bf?"B":"", Rd,
-              Rn, Uf?"+":"-", immediate_ldr, Wf?"!":"");
-        } else {
-            PRINTF("ldr0 %s%s dst register R%d,"
-            " [base address at R%d], Second address immediate #%s0x%x\r\n",
-             Lf?"LDR":"STR", Bf?"B":"", Rd,
-              Rn, Uf?"+":"-", immediate_ldr);
-        }
-        break;
-    case code_type_ldr1:
-        if(Pf) {
-            PRINTF("ldr1 %s%s dst register R%d,"
-            " [base address at R%d, offset address at %s[R%d %s %d]] %s\r\n",
-             Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",
-              Rm, shift_table[shift], shift_amount, Wf?"!":"");
-        } else {
-            PRINTF("ldr1 %s%s dst register R%d,"
-            " [base address at R%d], offset address at %s[R%d %s %d] \r\n",
-             Lf?"LDR":"STR", Bf?"B":"", Rd, Rn, Uf?"+":"-",
-              Rm, shift_table[shift], shift_amount);
-        }
-        break;
-    case code_type_ldm:
-        PRINTF("ldm %s%s%s R%d%s \r\n",
-         Lf?"LDM":"STM", Uf?"I":"D", Pf?"B":"A",  Rn, Wf?"!":"");
-        break;
-    case code_type_b:
-        PRINTF("B%s PC +  0x%08x\r\n", Lf_b?"L":"", immediate_b);
-        break;
-    case code_type_swi:
-        PRINTF("swi \r\n");
-    case code_type_mcr:
-        PRINTF("mcr \r\n");
-        break;
-    }
-}
-
-
-
-static uint32_t code_shifter(struct armv4_cpu_t *cpu, const union ins_t ins,
+static inline uint32_t code_shifter(struct armv4_cpu_t *cpu, const union ins_t ins,
  uint8_t code_type, uint8_t *carry)
 {
     uint32_t operand2 = register_read(cpu, Rm); //3_0;
@@ -1597,7 +1020,7 @@ static void code_ldr(struct armv4_cpu_t *cpu, const union ins_t ins,
     
     uint32_t tmpcpsr = cpsr(cpu);
     uint8_t ldrt = 0;
-    if(!Pf && Wf && (code_type == code_type_ldr0 || code_type == code_type_ldr1) ) {
+    if(!Pf && Wf) {
         //LDRT as user mode
         cpsr(cpu) &= 0x1f;
         cpsr(cpu) |= CPSR_M_USR;
@@ -1801,53 +1224,56 @@ static void code_ldm(struct armv4_cpu_t *cpu, const union ins_t ins,
 }
 
 
+#define  UserMask    0xF0000000
+#define  PrivMask    0x000000FF
+#define  StateMask   0x00000020
+
 static void code_msr(struct armv4_cpu_t *cpu, const union ins_t ins,
  uint32_t operand2)
 {
     if(cpu->decoder.code_type == code_type_mrs) {
         if(Bit22) {
-            uint8_t mode = get_cpu_mode_code(cpu);
-            register_write(cpu, Rd, cpu->spsr[mode]);
-            PRINTF("write register R%d = [spsr]0x%x\r\n", Rd, cpu->spsr[mode]);
+            uint8_t cpu_mode = get_cpu_mode_code(cpu);
+            register_write(cpu, Rd, cpu->spsr[cpu_mode]);
+            PRINTF("write register R%d = [spsr_%s]0x%x\r\n",
+             Rd, string_register_mode[cpu_mode], cpu->spsr[cpu_mode]);
         } else {
             register_write(cpu, Rd, cpsr(cpu));
             PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr(cpu));
         }
     } else {
         uint32_t aluout = operand2;
-        uint8_t cpu_mode;
+        uint32_t byte_mask = 0;
+        if(Rn & 1)
+            byte_mask |= 0xff; //c
+        if(Rn & 2)
+            byte_mask |= 0xff00;  //x
+        if(Rn & 4)
+            byte_mask |= 0xff0000;  //s
+        if(Rn & 8)
+            byte_mask |= 0xff000000;  //f
+
         if(Bit22) {
             //write spsr
-            cpu_mode = get_cpu_mode_code(cpu);
-            if(cpu_mode == 0) {
-                printf("[MSR] user mode has not spsr\r\n");
-                exception_out(cpu);
+            uint8_t cpu_mode = get_cpu_mode_code(cpu);
+            if(cpu_mode != 0) {
+                byte_mask &= UserMask | PrivMask | StateMask;
+                cpu->spsr[cpu_mode] &= ~byte_mask;
+                cpu->spsr[cpu_mode] |= aluout & byte_mask;
+                PRINTF("write register spsr_%s = 0x%x\r\n",
+                 string_register_mode[cpu_mode], cpu->spsr[cpu_mode]);
             }
         } else {
             //write cpsr
-            cpu_mode = 0;
-            if(cpsr_m(cpu) == CPSR_M_USR && (Rn & 0x7) ) {
-                printf("[MSR] cpu is user mode, flags field can write only\r\n");
-                exception_out(cpu);
+            if(cpsr_m(cpu) == CPSR_M_USR) {
+                byte_mask &= UserMask;
+            } else {
+                byte_mask &= UserMask | PrivMask;
             }
-        } 
-        if(IS_SET(Rn, 0) ) {
-            cpu->spsr[cpu_mode] &= 0xffffff00;
-            cpu->spsr[cpu_mode] |= aluout & 0xff;
+            cpsr(cpu) &= ~byte_mask;
+            cpsr(cpu) |= aluout & byte_mask;
+            PRINTF("write register cpsr = 0x%x\r\n", cpsr(cpu));
         }
-        if(IS_SET(Rn, 1) ) {
-            cpu->spsr[cpu_mode] &= 0xffff00ff;
-            cpu->spsr[cpu_mode] |= aluout & 0xff00;
-        }
-        if(IS_SET(Rn, 2) ) {
-            cpu->spsr[cpu_mode] &= 0xff00ffff;
-            cpu->spsr[cpu_mode] |= aluout & 0xff0000;
-        }
-        if(IS_SET(Rn, 3) ) {
-            cpu->spsr[cpu_mode] &= 0x00ffffff;
-            cpu->spsr[cpu_mode] |= aluout & 0xff000000;
-        }
-        PRINTF("write register spsr_%d = 0x%x\r\n", cpu_mode, cpu->spsr[cpu_mode]);
     }
 }
 
@@ -1863,10 +1289,16 @@ static void code_mcr(struct armv4_cpu_t *cpu, const union ins_t ins)
     if(Bit20) {
         //mrc
         Rd_val = cp15_read(&cpu->mmu, ins.mcr.CRn, ins.mcr.CRm, ins.mcr.opcode2);
-        register_write(cpu, Rd, Rd_val);
 
-        PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n",
-         Rs, ins.mcr.CRn, Rd_val, ins.mcr.opcode2, Rd);
+        if(Rd == 15) {
+            cpsr(cpu) &= ~0xF0000000;
+            cpsr(cpu) |= Rd_val & 0xF0000000;
+        } else {
+            register_write(cpu, Rd, Rd_val);
+            PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n",
+             Rs, ins.mcr.CRn, Rd_val, ins.mcr.opcode2, Rd);
+        }
+        
     } else {
         //mcr
         Rd_val = register_read(cpu, Rd);
@@ -2066,10 +1498,14 @@ void decode(struct armv4_cpu_t *cpu)
         return;
     }
 
-    dec->code_type = code_decoder(ins);
-    if(DEBUG)
-        code_debug(ins, dec->code_type);
-
+    
+    if(DEBUG) {
+        char code_buff[AS_CODE_LEN];
+        dec->code_type = code_disassembly(dec->instruction_word, code_buff, AS_CODE_LEN);
+        PRINTF("%s\n", code_buff);
+    } else {
+        dec->code_type = code_decoder(ins);
+    }
 
     //------------------------------------------------------------------------
     //------------------------------------------------------------------------
