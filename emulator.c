@@ -185,8 +185,8 @@ uint32_t load_disassembly(const char *file_name)
             printf("Error fread mem file %s, %d\n", file_name, ret);
             exit(-1);
         }
-        code_disassembly(instruction, code_buff, AS_CODE_LEN);
-        printf("  %8x:      %08x      %s\n", address, instruction, code_buff);
+        code_disassembly(instruction, address, code_buff, AS_CODE_LEN);
+        printf(AS_CODE_FORMAT, address, instruction, code_buff);
         address = address + 4;
     }
     printf("code size %u\n", address);
@@ -264,9 +264,9 @@ void print_addr(struct armv4_cpu_t *cpu, char *ps)
         if(sscanf(ps, "%x", &printaddr) == 1) {
             uint32_t data = read_word_without_mmu(cpu, printaddr);
             printf("p, *(0x%08x) = 0x%08x\n", printaddr, data);
-            code_disassembly(data, code_buff, AS_CODE_LEN);
-            printf("disassembly\n  %8x:      %08x      %s\n",
-             printaddr, data, code_buff);
+            code_disassembly(data, printaddr, code_buff, AS_CODE_LEN);
+            printf("disassembly:\n");
+            printf(AS_CODE_FORMAT, printaddr, data, code_buff);
         }
         break;
     case 'v':
@@ -276,9 +276,9 @@ void print_addr(struct armv4_cpu_t *cpu, char *ps)
             uint32_t data = read_word(cpu, printaddr);
             if(!cpu->mmu.mmu_fault) {
                 printf("v, *(0x%08x) = 0x%08x\n", printaddr, data);
-                code_disassembly(data, code_buff, AS_CODE_LEN);
-                printf("disassembly\n  %8x:      %08x      %s\n",
-                 printaddr, data, code_buff);
+                code_disassembly(data, printaddr, code_buff, AS_CODE_LEN);
+                printf("disassembly:\n");
+                printf(AS_CODE_FORMAT, printaddr, data, code_buff);
             } else {
                 printf("v, *(0x%08x) mmu fault, fsr=0x%x\n",
                  printaddr, cp15_fsr(&cpu->mmu));

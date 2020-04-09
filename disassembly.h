@@ -22,6 +22,7 @@
 #include <stdint.h>
 
 #define AS_CODE_LEN          (256)
+#define AS_CODE_FORMAT       "%8x:\t%08x\t%s\n"
 
 
 #define  code_type_swi      1
@@ -217,7 +218,7 @@ union ins_t {
 #define immediate_b       (((ins.b.offset23) ? (ins.b.offset22_0 | 0xFF800000) : (ins.b.offset22_0)) << 2)
 
 uint8_t code_decoder(const union ins_t ins);
-uint8_t code_disassembly(const uint32_t code, char *buf, int len);
+uint8_t code_disassembly(const uint32_t code, const uint32_t pc, char *buf, int len);
 
 #endif
 /*****************************END OF FILE***************************/

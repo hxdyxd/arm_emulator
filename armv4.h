@@ -202,7 +202,7 @@ static uint8_t get_cpu_mode_code(struct armv4_cpu_t *cpu)
  * register_read
  * author:hxdyxd
  */
-static inline uint32_t register_read(struct armv4_cpu_t *cpu, uint8_t id)
+static inline uint32_t register_read(struct armv4_cpu_t *cpu, const uint8_t id)
 {
     //Register file
     if(id < 8) {
@@ -223,7 +223,7 @@ static inline uint32_t register_read(struct armv4_cpu_t *cpu, uint8_t id)
  * register_write
  * author:hxdyxd
  */
-static inline void register_write(struct armv4_cpu_t *cpu, uint8_t id, uint32_t val)
+static inline void register_write(struct armv4_cpu_t *cpu, const uint8_t id, const uint32_t val)
 {
     //Register file
     if(id < 8 || id == 15) {

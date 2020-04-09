@@ -20,23 +20,30 @@
 #include <disassembly.h>
 
 
-const char *opcode_table[16] = {
+static const char *opcode_table[16] = {
     "AND", "EOR", "SUB", "RSB", 
     "ADD", "ADC", "SBC", "RSC", 
     "TST", "TEQ", "CMP", "CMN", 
-    "ORR", "MOV", "BIC", "MVN"
+    "ORR", "MOV", "BIC", "MVN",
 };
-const char *shift_table[4] = {
+
+static const char *shift_table[4] = {
     "LSL", //00
     "LSR", //01
     "ASR", //10
     "ROR", //11
 };
-const char *code_cond_table[16] = {
+
+static const char *code_cond_table[16] = {
     "EQ","NE","CS","CC",
     "MI","PL","VS","VC",
     "HI","LS","GE","LT",
-    "GT","LE","","-",
+    "GT","LE",  "", "-",
+};
+
+static const char *arm_regname[16] = {
+    "R0", "R1", "R2",  "R3",  "R4",  "R5", "R6", "R7",
+    "R8", "R9", "R10", "R11", "R12", "SP", "LR", "PC",
 };
 
 
@@ -201,7 +208,7 @@ uint8_t code_decoder(const union ins_t ins)
 }
 
 
-uint8_t code_disassembly(const uint32_t code, char *buf, int len)
+uint8_t code_disassembly(const uint32_t code, const uint32_t pc, char *buf, int len)
 {
     const union ins_t ins = {
         .word = code,
@@ -209,109 +216,121 @@ uint8_t code_disassembly(const uint32_t code, char *buf, int len)
     uint8_t code_type = code_decoder(ins);
     switch(code_type) {
     case code_type_dp0:
-        sprintf(buf, "%s%s%s\tR%d, R%d, R%d %s #%d",
-             opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], Rd,
-              Rn, Rm, shift_table[shift], shift_amount);
+        sprintf(buf, "%s%s%s\t%s, %s, %s %s #%d",
+             opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], arm_regname[Rm], shift_table[shift], shift_amount);
         break;
     case code_type_dp1:
-        sprintf(buf, "%s%s%s\tR%d, R%d, R%d %s R%d",
-            opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], Rd,
-             Rn, Rm, shift_table[shift], Rs);
+        sprintf(buf, "%s%s%s\t%s, %s, %s %s %s",
+            opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+             arm_regname[Rn], arm_regname[Rm], shift_table[shift], arm_regname[Rs]);
         break;
     case code_type_dp2:
-        sprintf(buf, "%s%s%s\tR%d, R%d, #%d",
-         opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], Rd,
-          Rn, ((immediate_i << (32 - rotate_imm*2)) | (immediate_i >> (rotate_imm*2))) );
+        sprintf(buf, "%s%s%s\t%s, %s, #%d",
+         opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+          arm_regname[Rn], ((immediate_i << (32 - rotate_imm*2)) | (immediate_i >> (rotate_imm*2))) );
         break;
 
     case code_type_bx:
-        sprintf(buf, "B%sX%s\tR%d", Lf_bx?"L":"", code_cond_table[ins.dp_is.cond], Rm);
+        sprintf(buf, "B%sX%s\t%s", Lf_bx?"L":"", code_cond_table[ins.dp_is.cond], arm_regname[Rm]);
         break;
     case code_type_b:
-        sprintf(buf, "B%s%s\tPC + 0x%08x", Lf_b?"L":"", code_cond_table[ins.dp_is.cond], immediate_b);
+        sprintf(buf, "B%s%s\t0x%x", Lf_b?"L":"", code_cond_table[ins.dp_is.cond], pc + immediate_b + 8);
         break;
 
     case code_type_ldr0:
         if(Pf) {
-            sprintf(buf, "%s%s%s\tR%d, [R%d, #%s%u]%s",
+            sprintf(buf, "%s%s%s\t%s, [%s, #%s%u]%s",
              Lf?"LDR":"STR", Bf?"B":"", code_cond_table[ins.dp_is.cond],
-              Rd, Rn, Uf?"":"-", immediate_ldr, Wf?"!":"");
+              arm_regname[Rd], arm_regname[Rn], Uf?"":"-", immediate_ldr, Wf?"!":"");
         } else {
-            sprintf(buf, "%s%s%s%s\tR%d, [R%d], #%s%u",
+            sprintf(buf, "%s%s%s%s\t%s, [%s], #%s%u",
              Lf?"LDR":"STR", Bf?"B":"", Wf?"T":"", code_cond_table[ins.dp_is.cond],
-              Rd, Rn, Uf?"":"-", immediate_ldr);
+              arm_regname[Rd], arm_regname[Rn], Uf?"":"-", immediate_ldr);
         }
         break;
     case code_type_ldr1:
         if(Pf) {
-            sprintf(buf, "%s%s%s\tR%d, [R%d, %sR%d %s #%d]%s",
+            sprintf(buf, "%s%s%s\t%s, [%s, %s%s %s #%d]%s",
              Lf?"LDR":"STR", Bf?"B":"", code_cond_table[ins.dp_is.cond],
-              Rd, Rn, Uf?"":"-", Rm, shift_table[shift], shift_amount, Wf?"!":"");
+              arm_regname[Rd], arm_regname[Rn], Uf?"":"-", arm_regname[Rm], shift_table[shift], shift_amount, Wf?"!":"");
         } else {
-            sprintf(buf, "%s%s%s%s\tR%d, [R%d], %sR%d %s #%d",
+            sprintf(buf, "%s%s%s%s\t%s, [%s], %s%s %s #%d",
              Lf?"LDR":"STR", Bf?"B":"", Wf?"T":"", code_cond_table[ins.dp_is.cond],
-              Rd, Rn, Uf?"":"-", Rm, shift_table[shift], shift_amount);
+              arm_regname[Rd], arm_regname[Rn], Uf?"":"-", arm_regname[Rm], shift_table[shift], shift_amount);
         }
         break;
     case code_type_ldrh0:
         if(Pf) {
-            sprintf(buf, "%sH%s\tR%d, [R%d, %sR%d]%s",
-             Lf?"LDR":"STR", code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", Rm, Wf?"!":"");
+            sprintf(buf, "%sH%s\t%s, [%s, %s%s]%s",
+             Lf?"LDR":"STR", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", arm_regname[Rm], Wf?"!":"");
         } else {
-            sprintf(buf, "%sH%s%s\tR%d, [R%d], %sR%d",
-             Lf?"LDR":"STR", Wf?"T":"", code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", Rm);
+            sprintf(buf, "%sH%s%s\t%s, [%s], %s%s",
+             Lf?"LDR":"STR", Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", arm_regname[Rm]);
         }
         break;
     case code_type_ldrh1:
         if(Pf) {
-            sprintf(buf, "%sH%s\tR%d, [R%d, #%s%d]%s",
-             Lf?"LDR":"STR", code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", immediate_extldr, Wf?"!":"");
+            sprintf(buf, "%sH%s\t%s, [%s, #%s%d]%s",
+             Lf?"LDR":"STR", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", immediate_extldr, Wf?"!":"");
         } else {
-            sprintf(buf, "%sH%s%s\tR%d, [R%d], #%s%d",
-             Lf?"LDR":"STR", Wf?"T":"", code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", immediate_extldr);
+            sprintf(buf, "%sH%s%s\t%s, [%s], #%s%d",
+             Lf?"LDR":"STR", Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", immediate_extldr);
         }
         break;
     case code_type_ldrsb0:
         if(Pf) {
-            sprintf(buf, "LDRSB%s\tR%d, [R%d, %sR%d]%s",
-             code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", Rm, Wf?"!":"");
+            sprintf(buf, "LDRSB%s\t%s, [%s, %s%s]%s",
+             code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", arm_regname[Rm], Wf?"!":"");
         } else {
-            sprintf(buf, "LDRSB%s%s\tR%d, [R%d], %sR%d",
-             Wf?"T":"", code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", Rm);
+            sprintf(buf, "LDRSB%s%s\t%s, [%s], %s%s",
+             Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", arm_regname[Rm]);
         }
         break;
     case code_type_ldrsb1:
         if(Pf) {
-            sprintf(buf, "LDRSB%s\tR%d, [R%d, #%s%d]%s",
-             code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", immediate_extldr, Wf?"!":"");
+            sprintf(buf, "LDRSB%s\t%s, [%s, #%s%d]%s",
+             code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", immediate_extldr, Wf?"!":"");
         } else {
-            sprintf(buf, "LDRSB%s%s\tR%d, [R%d], #%s%d",
-             Wf?"T":"", code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", immediate_extldr);
+            sprintf(buf, "LDRSB%s%s\t%s, [%s], #%s%d",
+             Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", immediate_extldr);
         }
         break;
     case code_type_ldrsh0:
         if(Pf) {
-            sprintf(buf, "LDRSH%s\tR%d, [R%d, %sR%d]%s",
-             code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", Rm, Wf?"!":"");
+            sprintf(buf, "LDRSH%s\t%s, [%s, %s%s]%s",
+             code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", arm_regname[Rm], Wf?"!":"");
         } else {
-            sprintf(buf, "LDRSH%s%s\tR%d, [R%d], %sR%d",
-             Wf?"T":"", code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", Rm);
+            sprintf(buf, "LDRSH%s%s\t%s, [%s], %s%s",
+             Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", arm_regname[Rm]);
         }
         break;
     case code_type_ldrsh1:
         if(Pf) {
-            sprintf(buf, "LDRSH%s\tR%d, [R%d, #%s%d]%s",
-             code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", immediate_extldr, Wf?"!":"");
+            sprintf(buf, "LDRSH%s\t%s, [%s, #%s%d]%s",
+             code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", immediate_extldr, Wf?"!":"");
         } else {
-            sprintf(buf, "LDRSH%s%s\tR%d, [R%d], #%s%d",
-             Wf?"T":"", code_cond_table[ins.dp_is.cond], Rd, Rn, Uf?"":"-", immediate_extldr);
+            sprintf(buf, "LDRSH%s%s\t%s, [%s], #%s%d",
+             Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", immediate_extldr);
         }
         break;
 
     case code_type_msr0:
-        sprintf(buf, "MSR%s\t%sPSR_%s%s%s%s R%d",
+        sprintf(buf, "MSR%s\t%sPSR_%s%s%s%s %s",
          code_cond_table[ins.dp_is.cond], Bit22?"S":"C",
-          Rn&8?"f":"", Rn&4?"s":"", Rn&2?"x":"", Rn&1?"c":"", Rm);
+          Rn&8?"f":"", Rn&4?"s":"", Rn&2?"x":"", Rn&1?"c":"", arm_regname[Rm]);
         break;
     case code_type_msr1:
         sprintf(buf, "MSR%s\t%sPSR_%s%s%s%s #0x%x",
@@ -320,38 +339,45 @@ uint8_t code_disassembly(const uint32_t code, char *buf, int len)
            ((immediate_i << (32 - rotate_imm*2)) | (immediate_i >> (rotate_imm*2))) );
         break;
     case code_type_mrs:
-        sprintf(buf, "MRS%s\tR%d %s",
-         code_cond_table[ins.dp_is.cond], Rd, Bit22?"SPSR":"CPSR");
+        sprintf(buf, "MRS%s\t%s %s",
+         code_cond_table[ins.dp_is.cond], arm_regname[Rd], Bit22?"SPSR":"CPSR");
         break;
 
     case code_type_mult:
-        sprintf(buf, "%s%s%s\tR%d, R%d, R%d, R%d",
-         Bit21?"MLA":"MUL", Bit20?"S":"", code_cond_table[ins.dp_is.cond], Rn, Rm, Rs, Rd);
+        if(Bit21)
+        sprintf(buf, "MLA%s%s\t%s, %s, %s, %s",
+          Bit20?"S":"", code_cond_table[ins.dp_is.cond],
+          arm_regname[Rn], arm_regname[Rm], arm_regname[Rs], arm_regname[Rd]);
+        else
+        sprintf(buf, "MUL%s%s\t%s, %s, %s",
+          Bit20?"S":"", code_cond_table[ins.dp_is.cond],
+          arm_regname[Rn], arm_regname[Rm], arm_regname[Rs]);
         break;
 
     case code_type_multl:
-        sprintf(buf, "%sM%s%s%s\tR%d, R%d, R%d, R%d",
-         Bit22?"S":"U", Bit21?"LAL":"ULL", Bit20?"S":"", code_cond_table[ins.dp_is.cond], Rd, Rn, Rm, Rs);
+        sprintf(buf, "%sM%s%s%s\t%s, %s, %s, %s",
+         Bit22?"S":"U", Bit21?"LAL":"ULL", Bit20?"S":"", code_cond_table[ins.dp_is.cond],
+          arm_regname[Rd], arm_regname[Rn], arm_regname[Rm], arm_regname[Rs]);
         break;
 
     case code_type_swp:
-        sprintf(buf, "SWP%s%s\tR%d R%d [R%d]",
-         Bf?"B":"", code_cond_table[ins.dp_is.cond], Rd, Rm, Rn);
+        sprintf(buf, "SWP%s%s\t%s %s [%s]",
+         Bf?"B":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd], arm_regname[Rm], arm_regname[Rn]);
         break;
 
     case code_type_ldm:
     {
         char *pbuf = buf;
-        pbuf += sprintf(pbuf, "%s%s%s%s\tR%d%s, {",
+        pbuf += sprintf(pbuf, "%s%s%s%s\t%s%s, {",
          Lf?"LDM":"STM", Uf?"I":"D", Pf?"B":"A",
-          code_cond_table[ins.dp_is.cond],  Rn, Wf?"!":"");
+          code_cond_table[ins.dp_is.cond],  arm_regname[Rn], Wf?"!":"");
         char *list_start = pbuf;
         for(int i=0; i<16; i++) {
             if( (1<<i) & ins.word) {
                 if(pbuf != list_start) {
                     pbuf += sprintf(pbuf, " ,");
                 }
-                pbuf += sprintf(pbuf, "R%d", i);
+                pbuf += sprintf(pbuf, "%s", arm_regname[i]);
             }
         }
         sprintf(pbuf, "}%s", Bit22?"^":"");
@@ -362,9 +388,9 @@ uint8_t code_disassembly(const uint32_t code, char *buf, int len)
         sprintf(buf, "SVC%s\t0x%08x", code_cond_table[ins.dp_is.cond], ins.swi.number);
         break;
     case code_type_mcr:
-        sprintf(buf, "%s%s\tp%d, %d, R%d, c%d, c%d, %d",
+        sprintf(buf, "%s%s\tp%d, %d, %s, c%d, c%d, %d",
          Bit20?"MRC":"MCR", code_cond_table[ins.dp_is.cond], ins.mcr.cp_num, ins.mcr.opcode1,
-          Rd, ins.mcr.CRn, ins.mcr.CRm, ins.mcr.opcode2);
+          arm_regname[Rd], ins.mcr.CRn, ins.mcr.CRm, ins.mcr.opcode2);
         break;
     default:
         sprintf(buf, "\t; undefined");

@@ -24,7 +24,7 @@
 #define  BMASK(v,m,r)  (((v)&(m)) == (r))
 
 
-const char *string_register_mode[7] = {
+static const char *string_register_mode[7] = {
     "USER",
     "FIQ",
     "IRQ",
@@ -43,7 +43,7 @@ uint8_t global_debug_flag = 0;
 void reg_show(struct armv4_cpu_t *cpu)
 {
     uint8_t cur_mode  = get_cpu_mode_code(cpu);
-    WARN("PC = 0x%x , code = %u\r\n", register_read(cpu, 15), cpu->code_counter);
+    WARN("PC = 0x%x , code = %u\r\n", cpu->reg[CPU_MODE_USER][15], cpu->code_counter);
     WARN("cpsr = 0x%x, %s\n", cpsr(cpu), string_register_mode[cur_mode]);
     WARN("User mode register:");
     for(int i=0; i<16; i++) {
@@ -617,7 +617,7 @@ void fetch(struct armv4_cpu_t *cpu)
     tlb_set_base(&cpu->mmu, TLB_I);
     cpu->decoder.instruction_word = read_word(cpu, pc_val);
     tlb_set_base(&cpu->mmu, TLB_D);
-    PRINTF("\t%x:    %08x    ", pc_val, cpu->decoder.instruction_word);
+    PRINTF("%8x:\t%08x\t", pc_val, cpu->decoder.instruction_word);
     register_write(cpu, 15, pc_val + 4 ); //current pc_val add 4
     if(mmu_check_status(&cpu->mmu)) {
         cpu->decoder.event_id = EVENT_ID_PREAABT;
@@ -1501,7 +1501,8 @@ void decode(struct armv4_cpu_t *cpu)
     
     if(DEBUG) {
         char code_buff[AS_CODE_LEN];
-        dec->code_type = code_disassembly(dec->instruction_word, code_buff, AS_CODE_LEN);
+        dec->code_type = code_disassembly(dec->instruction_word,
+         register_read(cpu, 15) - 8, code_buff, AS_CODE_LEN);
         PRINTF("%s\n", code_buff);
     } else {
         dec->code_type = code_decoder(ins);
