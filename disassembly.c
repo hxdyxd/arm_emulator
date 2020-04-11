@@ -52,10 +52,18 @@ uint8_t code_decoder(const union ins_t ins)
     uint8_t code_type = code_type_unknow;
     if(ins.dp_is.cond == 0xf)
         return code_type;
+
     switch(ins.dp_is.f) {
     case 0:
-        switch(Bit4) {
-        case 0:
+        switch(ins.word & 0xf0) {
+        case 0x00: //0xx0 xxxx
+        case 0x20:
+        case 0x40:
+        case 0x60:
+        case 0x80: //1xx0 xxxx
+        case 0xa0:
+        case 0xc0:
+        case 0xe0:
             if( (ins.word & 0x1b0ffe0) == 0x120f000) {
                 //Miscellaneous instructions
                 code_type = code_type_msr0;
@@ -67,103 +75,101 @@ uint8_t code_decoder(const union ins_t ins)
                 code_type = code_type_dp0;
             }
             break;
-        case 1:
-            switch(Bit7) {
-            case 0:
-                if( (Bit24_23 == 2 ) && !Bit20 ) {
-                    //Miscellaneous instructions
-                    if( (ins.word & 0x1ffffc0) == 0x12fff00) {
-                        //Branch/exchange
-                        code_type = code_type_bx;
-                    } else if(Bit6 && !Bit5 ) {
-                        //Enhanced DSP add/subtracts
-                        //ERROR("Enhanced DSP add/subtracts R%d\r\n", Rm);
-                    } else if(Bit6 && Bit5) {
-                        //Software breakpoint
-                        //ERROR("Software breakpoint \r\n");
-                    } else if(!Bit6 && !Bit5 && opcode == 0xb) {
-                        //Count leading zero
-                        code_type = code_type_clz;
-                        //ERROR("Count leading zero \r\n");
-                    } else {
-                        //ERROR("Undefed Miscellaneous instructions\r\n");
-                    }
+
+        case 0x10: //0xx1 xxxx
+        case 0x30:
+        case 0x50:
+        case 0x70:
+            if( (Bit24_23 == 2 ) && !Bit20 ) {
+                //Miscellaneous instructions
+                if( (ins.word & 0x1ffffc0) == 0x12fff00) {
+                    //Branch/exchange
+                    code_type = code_type_bx;
+                } else if(Bit6 && !Bit5 ) {
+                    //Enhanced DSP add/subtracts
+                    //ERROR("Enhanced DSP add/subtracts R%d\r\n", Rm);
+                } else if(Bit6 && Bit5) {
+                    //Software breakpoint
+                    //ERROR("Software breakpoint \r\n");
+                } else if(!Bit6 && !Bit5 && opcode == 0xb) {
+                    //Count leading zero
+                    code_type = code_type_clz;
+                    //ERROR("Count leading zero \r\n");
                 } else {
-                    //Data processing register shift by register
-                    code_type = code_type_dp1;
+                    //ERROR("Undefed Miscellaneous instructions\r\n");
                 }
-                break;
-            case 1:
-                //Multiplies, extra load/storesss
-                switch(shift) {
-                case 0:
-                    if(Bit24_23 == 0) {
-                        if(!Bit22)
-                            code_type = code_type_mult;
-                    } else if(Bit24_23 == 1) {
-                        code_type = code_type_multl;
-                    } else if(Bit24_23 == 2 && !Bit20 && !Bit21 && !Rs) {
-                        code_type = code_type_swp;
-                    }
-                    break;
-                case 1:
-                    //code_type_ldrh
-                    if(Bit22) {
-                        code_type = code_type_ldrh1;
-                    } else if(!Rs) {
-                        code_type = code_type_ldrh0;
-                    }
-                    break;
-                case 2:
-                    //code_type_ldrsb
-                    if(Bit22) {
-                        code_type = code_type_ldrsb1;
-                    } else if(!Rs) {
-                        code_type = code_type_ldrsb0;
-                    }
-                    if(!Lf) {
-                        code_type = code_type_unknow;
-                        //ERROR("undefed LDRD\r\n");
-                    }
-                    break;
-                case 3:
-                    //code_type_ldrsh
-                    if(Bit22) {
-                        code_type = code_type_ldrsh1;
-                    } else if(!Rs) {
-                        code_type = code_type_ldrsh0;
-                    }
-                    if(!Lf) {
-                        code_type = code_type_unknow;
-                        //ERROR("undefed STRD\r\n");
-                    }
-                    break;
-                default:
-                    ;
-                    //ERROR("undefed shift\r\n");
-                }
-                break;
-            default:
-                ;
-                //ERROR("undefed Bit7\r\n");
+            } else {
+                //Data processing register shift by register
+                code_type = code_type_dp1;
             }
             break;
-        default:
-            ;
-            //ERROR("undefed Bit4\r\n");
+
+        //Multiplies, extra load/storesss
+        case 0x90: //1001 xxxx
+            if(Bit24_23 == 0) {
+                if(!Bit22) {
+                    code_type = code_type_mult;
+                } else{
+                    //UMAAL
+                }
+            } else if(Bit24_23 == 1) {
+                code_type = code_type_multl;
+            } else if(Bit24_23 == 2 && !Bit20 && !Bit21 && !Rs) {
+                code_type = code_type_swp;
+            }
+            break;
+        case 0xb0: //1011 xxxx
+            //code_type_ldrh
+            if(Bit22) {
+                code_type = code_type_ldrh1;
+            } else if(!Rs) {
+                code_type = code_type_ldrh0;
+            }
+            break;
+        case 0xd0: //1101 xxxx
+            //code_type_ldrsb
+            if(Bit22) {
+                if(Lf)
+                    code_type = code_type_ldrsb1;
+                else
+                    code_type = code_type_ldrd1;
+            } else if(!Rs) {
+                if(Lf)
+                    code_type = code_type_ldrsb0;
+                else
+                    code_type = code_type_ldrd0;
+            }
+            break;
+        case 0xf0: //1111 xxxx
+            //code_type_ldrsh
+            if(Bit22) {
+                if(Lf)
+                    code_type = code_type_ldrsh1;
+                else
+                    code_type = code_type_ldrd1;
+            } else if(!Rs) {
+                if(Lf)
+                    code_type = code_type_ldrsh0;
+                else
+                    code_type = code_type_ldrd0;
+            }
+            break;
         }
         break;
+
     case 1:
         //Data processing immediate and move immediate to status register
-        if( (ins.word & 0x1b0f000) == 0x120f000) {
-            //24_23,21_20,15_12
-            code_type = code_type_msr1;
-        } else if( (ins.word & 0x1b00000) == 0x1000000 ) {
-            //24_23,21_20
-            //PRINTF("undefined instruction\r\n");
-        } else {
+        if( (ins.word & 0x1900000) != 0x1000000) {
+            //Bit24_23, Bit20
             //Data processing immediate
             code_type = code_type_dp2;
+        } else {
+            if(Bit21 && Rd == 0xf) {
+                //24_23,21_20,15_12
+                code_type = code_type_msr1;
+            } else {
+                //PRINTF("undefined instruction\r\n");
+            }
         }
         break;
     case 2:
@@ -216,19 +222,26 @@ uint8_t code_disassembly(const uint32_t code, const uint32_t pc, char *buf, int 
     uint8_t code_type = code_decoder(ins);
     switch(code_type) {
     case code_type_dp0:
-        sprintf(buf, "%s%s%s\t%s, %s, %s %s #%d",
-             opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
-              arm_regname[Rn], arm_regname[Rm], shift_table[shift], shift_amount);
+        sprintf(buf, "%s%s%s\t%s%s%s%s%s %s #%d",
+             opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond],
+              NO_RD ? "" : arm_regname[Rd], NO_RD ? "" : ", ",
+              NO_RN ? "" : arm_regname[Rn], NO_RN ? "" : ", ",
+               arm_regname[Rm], shift_table[shift], shift_amount);
         break;
     case code_type_dp1:
-        sprintf(buf, "%s%s%s\t%s, %s, %s %s %s",
-            opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
-             arm_regname[Rn], arm_regname[Rm], shift_table[shift], arm_regname[Rs]);
+        sprintf(buf, "%s%s%s\t%s%s%s%s%s %s %s",
+            opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond],
+             NO_RD ? "" : arm_regname[Rd], NO_RD ? "" : ", ",
+             NO_RN ? "" : arm_regname[Rn], NO_RN ? "" : ", ",
+              arm_regname[Rm], shift_table[shift], arm_regname[Rs]);
         break;
     case code_type_dp2:
-        sprintf(buf, "%s%s%s\t%s, %s, #%d",
-         opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
-          arm_regname[Rn], ((immediate_i << (32 - rotate_imm*2)) | (immediate_i >> (rotate_imm*2))) );
+        sprintf(buf, "%s%s%s\t%s%s%s%s#%d ; 0x%x",
+         opcode_table[opcode], Bit20?"S":"", code_cond_table[ins.dp_is.cond],
+          NO_RD ? "" : arm_regname[Rd], NO_RD ? "" : ", ",
+          NO_RN ? "" : arm_regname[Rn], NO_RN ? "" : ", ",
+           ((immediate_i << (32 - rotate_imm*2)) | (immediate_i >> (rotate_imm*2))),
+           ((immediate_i << (32 - rotate_imm*2)) | (immediate_i >> (rotate_imm*2))) );
         break;
 
     case code_type_bx:
@@ -323,6 +336,28 @@ uint8_t code_disassembly(const uint32_t code, const uint32_t pc, char *buf, int 
         } else {
             sprintf(buf, "LDRSH%s%s\t%s, [%s], #%s%d",
              Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", immediate_extldr);
+        }
+        break;
+    case code_type_ldrd0:
+        if(Pf) {
+            sprintf(buf, "%sD%s\t%s, [%s, %s%s]%s",
+             Bit5?"STR":"LDR", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", arm_regname[Rm], Wf?"!":"");
+        } else {
+            sprintf(buf, "%sD%s%s\t%s, [%s], %s%s",
+             Bit5?"STR":"LDR", Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", arm_regname[Rm]);
+        }
+        break;
+    case code_type_ldrd1:
+        if(Pf) {
+            sprintf(buf, "%sD%s\t%s, [%s, #%s%d]%s",
+             Bit5?"STR":"LDR", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
+              arm_regname[Rn], Uf?"":"-", immediate_extldr, Wf?"!":"");
+        } else {
+            sprintf(buf, "%sD%s%s\t%s, [%s], #%s%d",
+             Bit5?"STR":"LDR", Wf?"T":"", code_cond_table[ins.dp_is.cond], arm_regname[Rd],
               arm_regname[Rn], Uf?"":"-", immediate_extldr);
         }
         break;

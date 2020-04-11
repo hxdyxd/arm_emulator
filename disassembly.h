@@ -48,6 +48,8 @@
 #define  code_type_mrs     21
 #define  code_type_mcr     22
 #define  code_type_clz     23
+#define  code_type_ldrd1   24
+#define  code_type_ldrd0   25
 #define  code_type_unknow  255
 
 /* instruction struct */
@@ -211,6 +213,9 @@ union ins_t {
 #define Lf            (ins.ldr_r.L) //ldr,ldm
 #define Lf_b          (ins.b.L) //b
 #define Lf_bx         (Bit5)  //bx
+
+#define NO_RD       (Bit24_23 == 2) //TST, TEQ, CMP, CMN
+#define NO_RN       (Bit24_23 == 3 && Bit21) //MOV, MVN
 
 #define immediate_i       (ins.dp_i.immediate)
 #define immediate_ldr     (ins.ldr_i.immediate)

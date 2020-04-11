@@ -156,6 +156,7 @@ struct armv4_cpu_t {
     }peripheral;
 
     uint32_t code_counter;
+    uint32_t code_time;
 };
 
 /*
@@ -214,7 +215,6 @@ static inline uint32_t register_read(struct armv4_cpu_t *cpu, const uint8_t id)
     } else if(cpsr_m(cpu) != CPSR_M_FIQ && id < 13) {
         return cpu->reg[CPU_MODE_USER][id];
     } else {
-        PRINTF("<%x>", cpsr_m(cpu));
         return cpu->reg[get_cpu_mode_code(cpu)][id];
     }
 }
@@ -233,7 +233,6 @@ static inline void register_write(struct armv4_cpu_t *cpu, const uint8_t id, con
     } else if(cpsr_m(cpu) != CPSR_M_FIQ && id < 13) {
         cpu->reg[CPU_MODE_USER][id] = val;
     } else {
-        PRINTF("<%x>", cpsr_m(cpu));
         cpu->reg[get_cpu_mode_code(cpu)][id] = val;
     }
 }

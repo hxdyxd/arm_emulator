@@ -30,6 +30,9 @@
 #include <signal.h>
 #include <slip_tun.h>
 
+#define DEBUG_PRINTF     printf
+#define ERROR_PRINTF     printf
+
 
 #define USE_LINUX          0
 #define USE_BINARY         1
@@ -135,9 +138,11 @@ static void enable_step_by_step(int sig)
 }
 
 
-static void romfs_exit(void)
+static void peripheral_exit(void)
 {
     fs_exit(0, &peripheral_reg_base.fs);
+    tim_exit(0, &peripheral_reg_base.tim);
+    memory_exit(0, &peripheral_reg_base.mem);
 }
 
 
@@ -150,13 +155,13 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
     unsigned int address, instruction;
     fp = fopen(file_name, "rb");
     if(fp == NULL) {
-        printf("Error opening input mem file %s\n", file_name);
+        ERROR_PRINTF("Error opening input mem file %s\n", file_name);
         exit(-1);
     }
     address = start;
     while(!feof(fp)) {
         if((ret = fread(&instruction, 4, 1, fp)) < 0) {
-            printf("Error fread mem file %s, %d\n", file_name, ret);
+            ERROR_PRINTF("Error fread mem file %s, %d\n", file_name, ret);
             exit(-1);
         }
         write_word(cpu, address, instruction);
@@ -176,13 +181,13 @@ uint32_t load_disassembly(const char *file_name)
     char code_buff[AS_CODE_LEN];
     fp = fopen(file_name, "rb");
     if(fp == NULL) {
-        printf("Error opening input mem file %s\n", file_name);
+        ERROR_PRINTF("Error opening input mem file %s\n", file_name);
         exit(-1);
     }
     address = 0;
     while(!feof(fp)) {
         if((ret = fread(&instruction, 4, 1, fp)) < 0) {
-            printf("Error fread mem file %s, %d\n", file_name, ret);
+            ERROR_PRINTF("Error fread mem file %s, %d\n", file_name, ret);
             exit(-1);
         }
         code_disassembly(instruction, address, code_buff, AS_CODE_LEN);
@@ -243,7 +248,7 @@ void usage_s(void)
     printf(
         "       p[p|v] [a]       Print physical/virtual address at 0x[a]\n");
     printf(
-        "       t                Print run time\n");
+        "       t[s]             Print run time and speed, set/clear realtime show flag\n");
     printf(
         "       h                Print this message\n");
     printf(
@@ -294,10 +299,27 @@ void print_addr(struct armv4_cpu_t *cpu, char *ps)
 }
 
 
+#define CLOCK_UPDATE_RATE    (0x1ffffff)
+static void clock_speed_detect(struct armv4_cpu_t *cpu, const uint8_t rt_debug)
+{
+    static uint32_t previous_time = 0;
+    if(!(cpu->code_counter & CLOCK_UPDATE_RATE)) {
+        uint32_t current_time = GET_TICK();
+        cpu->code_time = current_time - previous_time;
+        previous_time = current_time;
+        if(rt_debug) {
+            printf("[RT]: %u ms, %.6f MIPS\n", GET_TICK(),
+             (CLOCK_UPDATE_RATE+1)/(1000.0*cpu->code_time) );
+        }
+    }
+}
+
+
 int main(int argc, char **argv)
 {
     struct armv4_cpu_t cpu_handle;
     struct armv4_cpu_t *cpu = &cpu_handle;
+    uint8_t realtime_speed_show = 0;
     //default value
     uint8_t mode = USE_BINARY;
     char *image_path = NULL;
@@ -360,7 +382,7 @@ int main(int argc, char **argv)
 
     atexit(slip_tun_exit);
     slip_tun_init();
-    atexit(romfs_exit);
+    atexit(peripheral_exit);
     cpu_init(cpu);
     peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
 
@@ -462,6 +484,14 @@ int main(int argc, char **argv)
                 break;
             case 't':
                 printf("Run time: %u ms\n", GET_TICK());
+                printf("Run speed: %u i/%u ms = %.3f MIPS\n", CLOCK_UPDATE_RATE, cpu->code_time,
+                 (CLOCK_UPDATE_RATE+1)/(1000.0*cpu->code_time) );
+                switch(*ps) {
+                case 's':
+                    realtime_speed_show = !realtime_speed_show;
+                    printf("[%s] Show realtime clock speed\n", realtime_speed_show ? "x" : " ");
+                    break;
+                }
                 break;
             case 'h':
             case '?':
@@ -491,6 +521,7 @@ RUN:
         switch(cpu->decoder.event_id) {
         case EVENT_ID_UNDEF:
             interrupt_exception(cpu, INT_EXCEPTION_UNDEF);
+            printf("undef:%08x\n", cpu->decoder.instruction_word);
             break;
         case EVENT_ID_SWI:
             interrupt_exception(cpu, INT_EXCEPTION_SWI);
@@ -502,10 +533,11 @@ RUN:
             interrupt_exception(cpu, INT_EXCEPTION_PREABT);
             break;
         default:
-            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter, 65536)) {
+            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter)) {
                 interrupt_exception(cpu, INT_EXCEPTION_IRQ);
             }
         }
+        clock_speed_detect(cpu, realtime_speed_show);
     }
 
     return 0;

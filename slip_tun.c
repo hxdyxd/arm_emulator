@@ -17,6 +17,7 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <slip_tun.h>
 
@@ -42,8 +43,8 @@
 #define ERROR_PRINTF     printf
 
 
-int tun_out_task_start(void);
-int tun_out_task_stop(void);
+static int tun_task_init(void);
+static int tun_task_exit(void);
 
 #define BUF_SIZE      (1800)
 #define FIFO_SIZE     (2048)
@@ -73,7 +74,7 @@ int slip_tun_init(void)
     pthread_mutex_init(&recv_mut, NULL);
 #endif
 
-    if(tun_out_task_start() < 0) {
+    if(tun_task_init() < 0) {
         return 0;
     }
     return 1;
@@ -81,7 +82,7 @@ int slip_tun_init(void)
 
 void slip_tun_exit(void)
 {
-    tun_out_task_stop();
+    tun_task_exit();
 }
 
 /* Non-blockable */
@@ -121,15 +122,12 @@ int slip_tun_write(int ch)
 }
 
 /***********************extern end*******************************/
-//Slip
-static volatile uint8_t slip_out_task_run_flag = 0;
-//Tun
-static volatile uint8_t tun_out_task_run_flag = 0;
+
 
 /* Blockable */
-void send_char(int ch)
+static inline void send_char(int ch, uint8_t *is_run)
 {
-    while(__kfifo_in(&send_fifo, &ch, 1) == 0 && tun_out_task_run_flag) {
+    while(__kfifo_in(&send_fifo, &ch, 1) == 0 && *is_run) {
 #ifdef TUN_MUTEX_MODE
         pthread_mutex_lock(&send_mut);
 #else
@@ -143,16 +141,16 @@ void send_char(int ch)
 }
 
 /* Blockable */
-void send_char_do(void)
+static inline void send_char_do(uint8_t *is_run)
 {
 
 }
 
 /* Blockable */
-int recv_char(void)
+static inline int recv_char(uint8_t *is_run)
 {
     uint8_t ch;
-    while(__kfifo_out(&recv_fifo, &ch, 1) == 0 && slip_out_task_run_flag) {
+    while(__kfifo_out(&recv_fifo, &ch, 1) == 0 && *is_run) {
 #ifdef TUN_MUTEX_MODE
         pthread_mutex_lock(&recv_mut);
 #else
@@ -168,155 +166,157 @@ int recv_char(void)
 
 
 
-int tun_alloc(int flags);
-void send_packet(unsigned char *p, int len);
-int recv_packet(unsigned char *p, int len);
-#if CHECK_SUM_ON
-//Checksum
-int if_api_calculate_checksum(void *buf, int len);
-int if_api_check(void *buf, int len);
-#endif
 
-static pthread_t gs_slip_out_task_pthread_id;
-static pthread_t gs_tun_out_task_pthread_id;
+static int tun_alloc(int flags);
+static void send_packet(unsigned char *p, int len, uint8_t *is_run);
+static int recv_packet(unsigned char *p, int len, uint8_t *is_run);
 
-static unsigned char tun_out_buffer[BUF_SIZE];
-static unsigned char slip_out_buffer[BUF_SIZE];
 
-void *slip_out_task_proc(void *par)
+struct slip_tun_status {
+    int fd;
+    uint8_t is_tun_out;
+    uint8_t is_run;
+    char *thread_name;
+    pthread_t thread_id;
+    unsigned char buf[BUF_SIZE];
+};
+
+struct slip_tun {
+    int fd;
+    struct slip_tun_status tun_out;
+    struct slip_tun_status slip_out;
+};
+
+
+static void *tun_task_proc(void *base)
 {
-    int tun_fd = *(int *)par;
-    prctl(PR_SET_NAME,"slip_out_task");
-    DEBUG_PRINTF("slip out task enter success %d!\n", tun_fd);
-    while(slip_out_task_run_flag) {
-        int total_len = recv_packet(slip_out_buffer, BUF_SIZE);
+    struct slip_tun_status *s = (struct slip_tun_status *)base;
+    int total_len;
 
-#if 0
-        DEBUG_PRINTF("SLIP R=%d\n", total_len);
-#endif
+    prctl(PR_SET_NAME, s->thread_name);
+    DEBUG_PRINTF("tun: %s task enter success %d!\n", s->thread_name, s->fd);
+    while(s->is_run) {
+        if(s->is_tun_out) {
+            struct timeval timeout = {
+                .tv_sec = 1,
+                .tv_usec = 0,
+            };
+            fd_set readset;
+            FD_ZERO(&readset);
+            FD_SET(s->fd, &readset);
 
-        total_len = write(tun_fd, slip_out_buffer, total_len);
+            int r = select(s->fd + 1, &readset, NULL, NULL, &timeout);
+            if (r < 0) {
+                if(errno == EINTR)
+                    continue;
+                ERROR_PRINTF("tun: %s select error\n", s->thread_name);
+                break;
+            }
+            if (FD_ISSET(s->fd, &readset)) {
+                int total_len = read(s->fd, s->buf, BUF_SIZE);
+                if (total_len < 0) {
+                    ERROR_PRINTF("tun: %s Reading from interface error\n", s->thread_name);
+                    break;
+                }
+                
+                send_packet(s->buf, total_len, &s->is_run);
+            }
+        } else {
+            //slip out
+            total_len = recv_packet(s->buf, BUF_SIZE, &s->is_run);
+            write(s->fd, s->buf, total_len);
+        }
     }
-    DEBUG_PRINTF("slip out task exit!\n");
+
+    s->is_run = 0;
+    DEBUG_PRINTF("tun: %s task exit!\n", s->thread_name);
     return NULL;
 }
 
 
-int slip_out_task_start(int *tun_fd)
+static int tun_task_start(struct slip_tun_status *s)
 {
-    slip_out_task_run_flag = 1;
-    DEBUG_PRINTF("slip out task start!\n");
-
-    return pthread_create(&gs_slip_out_task_pthread_id, 0, slip_out_task_proc, tun_fd);
+    s->is_run = 1;
+    return pthread_create(&s->thread_id, 0, tun_task_proc, s);
 }
 
-int slip_out_task_stop(void)
+
+static int tun_task_stop(struct slip_tun_status *s)
 {
-    if (slip_out_task_run_flag == 1) {
-        slip_out_task_run_flag = 0;
-        pthread_join(gs_slip_out_task_pthread_id, 0);
+    if (s->is_run == 1) {
+        s->is_run = 0;
+        pthread_join(s->thread_id, 0);
     } else {
-        ERROR_PRINTF("slip out task stop failed!\n");
+        ERROR_PRINTF("tun: %s stop failed!\n", s->thread_name);
         return -1;
     }
     return 0;
 }
 
 
+static struct slip_tun *tun = NULL;
 
-void *tun_out_task_proc(void *par)
+static int tun_task_init(void)
 {
-    int tun_fd = *(int *)par;
-    prctl(PR_SET_NAME,"tun_out_task");
-    DEBUG_PRINTF("tun out task enter success %d!\n", tun_fd);
-    int maxsock = 0;
-    if(tun_fd > maxsock) {
-        maxsock = tun_fd;
+    tun = (struct slip_tun *)malloc(sizeof(struct slip_tun));
+    if(!tun) {
+        ERROR_PRINTF("tun: allocating err\n");
+        goto err0;
     }
-    
-    while(tun_out_task_run_flag) {
-        int r;
-        struct timeval timeout = {
-            .tv_sec = 1,
-            .tv_usec = 0,
-        };
-        fd_set readset;
 
-        FD_ZERO(&readset);
-        FD_SET(tun_fd, &readset);
-
-        r = select(maxsock + 1, &readset, NULL, NULL, &timeout);
-        if (r < 0) {
-            if(errno == EINTR)
-                continue;
-            ERROR_PRINTF("select error\n");
-            break;
-        }
-        if (FD_ISSET(tun_fd, &readset)) {
-            int total_len = read(tun_fd, tun_out_buffer, BUF_SIZE);
-            if (total_len < 0) {
-                ERROR_PRINTF("Reading from interface error\n");
-                break;
-            }
-            
-            send_packet(tun_out_buffer, total_len);
-        }
-    }
-    tun_out_task_run_flag = 0;
-    slip_out_task_stop();
-    close(tun_fd);
-    DEBUG_PRINTF("tun out task exit!\n");
-    return NULL;
-}
-
-static int tun_fd;
-int tun_out_task_start(void)
-{
-    DEBUG_PRINTF("open TUN/TAP device\n" );
     /* Flags: IFF_TUN   - TUN device (no Ethernet headers)
      *        IFF_TAP   - TAP device
      *        IFF_NO_PI - Do not provide packet information
      */
-    tun_fd = tun_alloc(IFF_TUN | IFF_NO_PI);
-    if (tun_fd < 0) {
-        ERROR_PRINTF("allocating interface error\n");
-        return -1;
-    }
-#if 1
-    if(slip_out_task_start(&tun_fd) < 0) {
-        ERROR_PRINTF("slip_out_task start error\n");
-        close(tun_fd);
-        return -1;
-    }
-#endif
-    tun_out_task_run_flag = 1;
-    DEBUG_PRINTF("tun out task start %d!\n", tun_fd);
+    tun->fd = tun_alloc(IFF_TUN | IFF_NO_PI);
+    if (tun->fd < 0)
+        goto err1;
 
-    return pthread_create(&gs_tun_out_task_pthread_id, 0, tun_out_task_proc, &tun_fd);
-}
+    tun->tun_out.fd = tun->fd;
+    tun->tun_out.is_tun_out = 1;
+    tun->tun_out.thread_name = "tun_out";
+    if(tun_task_start(&tun->tun_out) < 0)
+        goto err2;
 
-int tun_out_task_stop(void)
-{
-    if (tun_out_task_run_flag == 1) {
-        tun_out_task_run_flag = 0;
-        pthread_join(gs_tun_out_task_pthread_id, 0);
-    } else {
-        ERROR_PRINTF("tun out task stop failed!\n");
-        return -1;
-    }
+    tun->slip_out.fd = tun->fd;
+    tun->slip_out.is_tun_out = 0;
+    tun->slip_out.thread_name = "slip_out";
+    if(tun_task_start(&tun->slip_out) < 0)
+        goto err2;
+
     return 0;
+
+err2:
+    close(tun->fd);
+err1:
+    free(tun);
+    tun = NULL;
+err0:
+    return -1;
 }
 
 
-
-int tun_alloc(int flags)
+static int tun_task_exit(void)
 {
+    if(tun && tun->fd > 0) {
+        tun_task_stop(&tun->slip_out);
+        tun_task_stop(&tun->tun_out);
+        close(tun->fd);
+        free(tun);
+        return 0;
+    }
+    return -1;
+}
 
+
+static int tun_alloc(int flags)
+{
     struct ifreq ifr;
     int fd, err;
     char *clonedev = "/dev/net/tun";
 
     if ((fd = open(clonedev, O_RDWR)) < 0) {
+        ERROR_PRINTF("tun: open %s err\n", clonedev);
         return fd;
     }
 
@@ -325,11 +325,11 @@ int tun_alloc(int flags)
 
     if ((err = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0) {
         close(fd);
+        ERROR_PRINTF("tun: ioctl fd = %d err\n", fd);
         return err;
     }
 
-    DEBUG_PRINTF("open tun/tap device: %s for reading...\n", ifr.ifr_name);
-
+    DEBUG_PRINTF("tun: open tun/tap device: %s for reading...\n", ifr.ifr_name);
     return fd;
 }
 
@@ -347,12 +347,12 @@ int tun_alloc(int flags)
 /* SEND_PACKET: sends a packet of length "len", starting at
  * location "p".
  */
-void send_packet(unsigned char *p, int len)
+static void send_packet(unsigned char *p, int len, uint8_t *is_run)
 {
     /* send an initial END character to flush out any data that may
      * have accumulated in the receiver due to line noise
      */
-    send_char(END);
+    send_char(END, is_run);
 
     /* for each byte in the packet, send the appropriate character
      * sequence
@@ -363,8 +363,8 @@ void send_packet(unsigned char *p, int len)
              * special two character code so as not to make the
              * receiver think we sent an END */
            case END:
-                send_char(ESC);
-                send_char(ESC_END);
+                send_char(ESC, is_run);
+                send_char(ESC_END, is_run);
                 break;
     
            /* if it's the same code as an ESC character,
@@ -372,22 +372,22 @@ void send_packet(unsigned char *p, int len)
             * to make the receiver think we sent an ESC
             */
            case ESC:
-                send_char(ESC);
-                send_char(ESC_ESC);
+                send_char(ESC, is_run);
+                send_char(ESC_ESC, is_run);
                 break;
     
            /* otherwise, we just send the character
             */
            default:
-                send_char(*p);
+                send_char(*p, is_run);
         }
         
         p++;
     }
 
    /* tell the receiver that we're done sending the packet */
-    send_char(END);
-    send_char_do();
+    send_char(END, is_run);
+    send_char_do(is_run);
 }
 
 
@@ -396,7 +396,7 @@ void send_packet(unsigned char *p, int len)
  *      be truncated.
  *      Returns the number of bytes stored in the buffer.
  */
-int recv_packet(unsigned char *p, int len)
+static int recv_packet(unsigned char *p, int len, uint8_t *is_run)
 {
     unsigned char c;
     int received = 0;
@@ -406,9 +406,9 @@ int recv_packet(unsigned char *p, int len)
      * Make sure not to copy them into the packet if we
      * run out of room.
      */
-    while(slip_out_task_run_flag) {
+    while(*is_run) {
        /* get a character to process */
-        c = recv_char();
+        c = recv_char(is_run);
 
        /* handle bytestuffing if necessary */
         switch(c) {
@@ -434,7 +434,7 @@ int recv_packet(unsigned char *p, int len)
             * what to store in the packet based on that.
             */
            case ESC:
-                c = recv_char();
+                c = recv_char(is_run);
 
                /* if "c" is not one of these two, then we
                 * have a protocol violation.  The best bet

@@ -18,7 +18,7 @@
  */
 #include <armv4.h>
 #include <disassembly.h>
-
+#include <assert.h>
 
 #define  BSET(b)  (1<<(b))
 #define  BMASK(v,m,r)  (((v)&(m)) == (r))
@@ -268,8 +268,7 @@ static inline uint32_t mmu_page_table_walk(struct armv4_cpu_t *cpu,
      (cp15_ttb(mmu)&0xFFFFC000) | ((vaddr&0xFFF00000) >> 18));
 
     uint8_t domain = (page_table_entry>>5)&0xf; //Domain field
-    uint8_t domainval =  domain << 1;
-    domainval = (cp15_domain(mmu) >> domainval)&0x3;
+    uint8_t domainval = (cp15_domain(mmu) >> (domain << 1))&0x3;
 
     uint8_t first_level_descriptor = page_table_entry&3;
     
@@ -799,7 +798,7 @@ static inline uint8_t shifter(struct armv4_cpu_t *cpu, uint32_t *op, const uint8
 
 static inline uint32_t adder(const uint32_t op1, const uint32_t op2, const uint8_t add_mode)
 {
-    PRINTF("[ALU]op1: 0x%x, sf_op2: 0x%x, out: 0x%x, ",
+    PRINTF("[ALU] op1: 0x%x, sf_op2: 0x%x, out: 0x%x\n",
          op1, op2, _adder(op1, op2, add_mode));
     return _adder(op1, op2, add_mode);
 }
@@ -827,7 +826,7 @@ static inline uint32_t adder_with_carry(const uint32_t op1, const uint32_t op2,
         *bit_cy = !(*bit_cy);
     }
     
-    PRINTF("[ALU]op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x, ",
+    PRINTF("[ALU] op1: 0x%x, sf_op2: 0x%x, c: %d, out: 0x%x\n",
      op1, op2, carry, aluout);
     return aluout;
 }
@@ -875,6 +874,7 @@ static inline uint32_t code_shifter(struct armv4_cpu_t *cpu, const union ins_t i
     case code_type_ldrh1:
     case code_type_ldrsb1:
     case code_type_ldrsh1:
+    case code_type_ldrd1:
         operand2 = immediate_extldr; //8bit
         break;
     case code_type_b:
@@ -939,6 +939,7 @@ static void code_dp(struct armv4_cpu_t *cpu, const union ins_t ins,
     case 13:
         //MOV
         aluout = operand2;
+        assert(Rn == 0);
         break;
     case 14:
         //BIC
@@ -947,14 +948,16 @@ static void code_dp(struct armv4_cpu_t *cpu, const union ins_t ins,
     case 15:
         //MVN
         aluout = ~operand2;
+        assert(Rn == 0);
         break;
     }
 
     if(Bit24_23 == 2) {
-        PRINTF("update flag only \r\n");
+        PRINTF("[DP] update flag only \r\n");
+        assert(Rd == 0);
     } else {
         register_write(cpu, Rd, aluout);
-        PRINTF("write register R%d = 0x%x\r\n", Rd, aluout);
+        PRINTF("[DP] write register R%d = 0x%x\r\n", Rd, aluout);
     }
     if(Bit20) {
         //Update CPSR register
@@ -995,14 +998,14 @@ static void code_b(struct armv4_cpu_t *cpu, const union ins_t ins,
 
     if(lf) {
         register_write(cpu, 14, register_read(cpu, 15) - 4);  //LR register
-        PRINTF("write register R%d = 0x%0x, ", 14, register_read(cpu, 14));
+        PRINTF("[B] write register R%d = 0x%0x, ", 14, register_read(cpu, 14));
     }
     
     if(aluout&3) {
-        ERROR("thumb unsupport \r\n");
+        ERROR("[B] thumb unsupport \r\n");
     }
     register_write(cpu, 15, aluout & 0xfffffffc);  //PC register
-    PRINTF("write register R%d = 0x%x \r\n", 15, aluout);
+    PRINTF("[B] write register R%d = 0x%x \r\n", 15, aluout);
 }
 
 
@@ -1064,7 +1067,7 @@ static void code_ldr(struct armv4_cpu_t *cpu, const union ins_t ins,
             return;
         }
         register_write(cpu, Rd, data);
-        PRINTF("load data [0x%x]:0x%x to R%d \r\n", 
+        PRINTF("[LDR] load data [0x%x]:0x%x to R%d \r\n", 
             address, register_read(cpu, Rd), Rd);
     } else {
         //STR
@@ -1077,16 +1080,10 @@ static void code_ldr(struct armv4_cpu_t *cpu, const union ins_t ins,
             break;
         case code_type_ldrsh1:
         case code_type_ldrsh0:
-            //Halfword Signed ?
-            write_halfword(cpu, address, data);
-            printf("STRSH ? \r\n");
-            exception_out(cpu);
-            break;
         case code_type_ldrsb1:
         case code_type_ldrsb0:
-            //Byte Signed ?
             write_byte(cpu, address, data);
-            printf("STRSB ? \r\n");
+            WARN("[LDR] str undef\n");
             exception_out(cpu);
             break;
         default:
@@ -1105,12 +1102,12 @@ static void code_ldr(struct armv4_cpu_t *cpu, const union ins_t ins,
             cpu->decoder.event_id = EVENT_ID_DATAABT;
             return;
         }
-        PRINTF("store data [R%d]:0x%x to 0x%x \r\n", Rd, data, address);
+        PRINTF("[LDR] store data [R%d]:0x%x to 0x%x \r\n", Rd, data, address);
     }
     if(!(!Wf && Pf)) {
         //Update base register
         register_write(cpu, Rn, aluout);
-        PRINTF("[LDR]write register R%d = 0x%x\r\n", Rn, aluout);
+        PRINTF("[LDR] write register R%d = 0x%x\r\n", Rn, aluout);
     }
     
     if(ldrt) {
@@ -1235,11 +1232,11 @@ static void code_msr(struct armv4_cpu_t *cpu, const union ins_t ins,
         if(Bit22) {
             uint8_t cpu_mode = get_cpu_mode_code(cpu);
             register_write(cpu, Rd, cpu->spsr[cpu_mode]);
-            PRINTF("write register R%d = [spsr_%s]0x%x\r\n",
+            PRINTF("[MSR] write register R%d = [spsr_%s]0x%x\r\n",
              Rd, string_register_mode[cpu_mode], cpu->spsr[cpu_mode]);
         } else {
             register_write(cpu, Rd, cpsr(cpu));
-            PRINTF("write register R%d = [cpsr]0x%x\r\n", Rd, cpsr(cpu));
+            PRINTF("[MSR] write register R%d = [cpsr]0x%x\r\n", Rd, cpsr(cpu));
         }
     } else {
         uint32_t aluout = operand2;
@@ -1260,7 +1257,7 @@ static void code_msr(struct armv4_cpu_t *cpu, const union ins_t ins,
                 byte_mask &= UserMask | PrivMask | StateMask;
                 cpu->spsr[cpu_mode] &= ~byte_mask;
                 cpu->spsr[cpu_mode] |= aluout & byte_mask;
-                PRINTF("write register spsr_%s = 0x%x\r\n",
+                PRINTF("[MSR] write register spsr_%s = 0x%x\r\n",
                  string_register_mode[cpu_mode], cpu->spsr[cpu_mode]);
             }
         } else {
@@ -1272,7 +1269,7 @@ static void code_msr(struct armv4_cpu_t *cpu, const union ins_t ins,
             }
             cpsr(cpu) &= ~byte_mask;
             cpsr(cpu) |= aluout & byte_mask;
-            PRINTF("write register cpsr = 0x%x\r\n", cpsr(cpu));
+            PRINTF("[MSR] write register cpsr = 0x%x\r\n", cpsr(cpu));
         }
     }
 }
@@ -1295,7 +1292,7 @@ static void code_mcr(struct armv4_cpu_t *cpu, const union ins_t ins)
             cpsr(cpu) |= Rd_val & 0xF0000000;
         } else {
             register_write(cpu, Rd, Rd_val);
-            PRINTF("read cp%d_c%d[0x%x] op2:%d to R%d \r\n",
+            PRINTF("[MCR] read cp%d_c%d[0x%x] op2:%d to R%d \r\n",
              Rs, ins.mcr.CRn, Rd_val, ins.mcr.opcode2, Rd);
         }
         
@@ -1304,7 +1301,7 @@ static void code_mcr(struct armv4_cpu_t *cpu, const union ins_t ins)
         Rd_val = register_read(cpu, Rd);
         cp15_write(&cpu->mmu, Rd_val, ins.mcr.CRn, ins.mcr.CRm, ins.mcr.opcode2);
 
-        PRINTF("write R%d[0x%x] to cp%d_c%d \r\n",
+        PRINTF("[MCR] write R%d[0x%x] to cp%d_c%d \r\n",
          Rd, Rd_val, ins.mcr.cp_num, ins.mcr.CRn);
     }
 }
@@ -1325,7 +1322,7 @@ static void code_mult(struct armv4_cpu_t *cpu, const union ins_t ins,
         cpsr_n_set(cpu, out_sign);
         cpsr_z_set(cpu, aluout == 0);
         //cv unaffected
-        PRINTF("update flag nzcv %d%d%d%d \r\n",
+        PRINTF("[MULT] update flag nzcv %d%d%d%d \r\n",
          cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
     }
 }
@@ -1363,7 +1360,7 @@ static void code_multl(struct armv4_cpu_t *cpu, const union ins_t ins,
     
     register_write(cpu, Rn, multl_long >> 32);
     register_write(cpu, Rd, multl_long & 0xffffffff);
-    PRINTF("write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x) \r\n",
+    PRINTF("[MULTL] write 0x%x to R%d, write 0x%x to R%d  = (0x%x) * (0x%x)\n",
     register_read(cpu, Rn), Rn, register_read(cpu, Rd), Rd, rm_num, rs_num);
     
     if(Bit20) {
@@ -1373,7 +1370,7 @@ static void code_multl(struct armv4_cpu_t *cpu, const union ins_t ins,
         cpsr_n_set(cpu, out_sign);
         cpsr_z_set(cpu, multl_long == 0);
         //cv unaffecteds
-        PRINTF("update flag nzcv %d%d%d%d \r\n",
+        PRINTF("[MULTL] update flag nzcv %d%d%d%d\n",
          cpsr_n(cpu), cpsr_z(cpu), cpsr_c(cpu), cpsr_v(cpu));
     }
 }
@@ -1397,6 +1394,96 @@ static void code_swp(struct armv4_cpu_t *cpu, const union ins_t ins,
         }
         write_word(cpu, operand1, operand2);
         register_write(cpu, Rd, aluout);
+        PRINTF("[SWP] write register R%d = 0x%x\r\n", Rd, aluout);
+    }
+}
+
+
+static void code_ldrd(struct armv4_cpu_t *cpu, const union ins_t ins,
+ uint32_t operand1, uint32_t operand2)
+{
+    uint32_t aluout = adder(operand1, operand2, Uf ? ALU_MODE_ADD : ALU_MODE_SUB);
+
+    uint32_t address = operand1;  //memory address
+    uint32_t data = 0;
+    if((Rd & 1) || Rd == 14 ) {
+        cpu->decoder.event_id = INT_EXCEPTION_UNDEF;
+        WARN("[LDRD] Rd = %d\n", Rd);
+        return;
+    }
+    if(Pf) {
+        address = aluout;
+    }
+    
+    uint32_t tmpcpsr = cpsr(cpu);
+    uint8_t ldrt = 0;
+    if(!Pf && Wf) {
+        //LDRT as user mode
+        cpsr(cpu) &= 0x1f;
+        cpsr(cpu) |= CPSR_M_USR;
+        ldrt = 1;
+    }
+    
+    if(Bit5) {
+        //STR
+        data = register_read(cpu, Rd);
+        write_word(cpu, address, data);
+        if(mmu_check_status(&cpu->mmu)) {
+            if(ldrt) {
+                //LDRT restore cpsr
+                cpsr(cpu) = tmpcpsr;
+            }
+            cpu->decoder.event_id = EVENT_ID_DATAABT;
+            return;
+        }
+        PRINTF("[LDRD] store data [R%d]:0x%x to 0x%x, ", Rd, data, address);
+
+        data = register_read(cpu, Rd + 1);
+        write_word(cpu, address + 4, data);
+        if(mmu_check_status(&cpu->mmu)) {
+            if(ldrt) {
+                //LDRT restore cpsr
+                cpsr(cpu) = tmpcpsr;
+            }
+            cpu->decoder.event_id = EVENT_ID_DATAABT;
+            return;
+        }
+        PRINTF("store data [R%d]:0x%x to 0x%x\n", Rd + 1, data, address + 4);
+    } else {
+        //LDR
+        data = read_word(cpu, address);
+        if(mmu_check_status(&cpu->mmu)) {
+            if(ldrt) {
+                //LDRT restore cpsr
+                cpsr(cpu) = tmpcpsr;
+            }
+            cpu->decoder.event_id = EVENT_ID_DATAABT;
+            return;
+        }
+        register_write(cpu, Rd, data);
+        PRINTF("[LDRD] load data [0x%x]:0x%x to R%d, ", address, data, Rd);
+
+        data = read_word(cpu, address + 4);
+        if(mmu_check_status(&cpu->mmu)) {
+            if(ldrt) {
+                //LDRT restore cpsr
+                cpsr(cpu) = tmpcpsr;
+            }
+            cpu->decoder.event_id = EVENT_ID_DATAABT;
+            return;
+        }
+        register_write(cpu, Rd + 1, data);
+        PRINTF("load data [0x%x]:0x%x to R%d\n", address + 4, data, Rd + 1);
+    }
+    if(!(!Wf && Pf)) {
+        //Update base register
+        register_write(cpu, Rn, aluout);
+        PRINTF("[LDRD] write register R%d = 0x%x\r\n", Rn, aluout);
+    }
+    
+    if(ldrt) {
+        //LDRT restore cpsr
+        cpsr(cpu) = tmpcpsr;
     }
 }
 
@@ -1428,6 +1515,7 @@ static void code_clz(struct armv4_cpu_t *cpu, const union ins_t ins,
         r -= 1;
     }
     register_write(cpu, Rd, r);
+    PRINTF("[CLZ] write register R%d = 0x%x\r\n", Rd, r);
 }
 
 
@@ -1560,11 +1648,16 @@ void decode(struct armv4_cpu_t *cpu)
     case code_type_swp:
         code_swp(cpu, ins, operand1, operand2);
         break;
-    case code_type_clz:
-        code_clz(cpu, ins, operand2);
-        break;
     case code_type_swi:
         cpu->decoder.event_id = EVENT_ID_SWI;
+        break;
+
+    case code_type_ldrd0:
+    case code_type_ldrd1:
+        code_ldrd(cpu, ins, operand1, operand2);
+        break;
+    case code_type_clz:
+        code_clz(cpu, ins, operand2);
         break;
     default:
         cpu->decoder.event_id = EVENT_ID_UNDEF;

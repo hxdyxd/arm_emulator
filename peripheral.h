@@ -24,6 +24,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <pthread.h>
+#include <sys/prctl.h>
 /*******HAL*******/
 #include <time.h>
 #include <stdlib.h>
@@ -65,11 +67,15 @@ struct peripheral_t {
 
     struct timer_register {
         //predefined start
+        uint8_t is_run;
+        uint32_t privious_cnt;
+        pthread_t thread_id;
         uint32_t interrupt_id;
         //predefined end
 
         uint32_t CNT; //Determine which interrupt source is masked.
         uint32_t EN; //Indicate the interrupt request status
+        uint32_t PERIOD;
     }tim;
 
     struct uart_register {
@@ -143,6 +149,7 @@ struct peripheral_t {
 
 #define  register_set(r,b,v)  do{ if(v) {r |= 1 << (b);} else {r &= ~(1 << (b));} }while(0)
 
+void memory_exit(int s, void *base);
 uint32_t memory_reset(void *base);
 uint32_t memory_read(void *base, uint32_t address);
 void memory_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
@@ -155,8 +162,9 @@ void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 uint32_t intc_reset(void *base);
 uint32_t intc_read(void *base, uint32_t address);
 void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
-uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, const uint32_t kips_speed);
+uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter);
 
+void tim_exit(int s, void *base);
 uint32_t tim_reset(void *base);
 uint32_t tim_read(void *base, uint32_t address);
 void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask);

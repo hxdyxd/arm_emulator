@@ -18,6 +18,9 @@
  */
 #include <peripheral.h>
 
+#define DEBUG_PRINTF     printf
+#define ERROR_PRINTF     printf
+
 
 /******************************memory*****************************************/
 uint32_t memory_reset(void *base)
@@ -25,10 +28,18 @@ uint32_t memory_reset(void *base)
     uint8_t **mem = base;
     *mem = (uint8_t *)malloc(MEM_SIZE);
     if(!*mem) {
-        printf("memory alloc error\n");
+        ERROR_PRINTF("memory: alloc err\n");
         return 0;
     }
     return 1;
+}
+
+
+void memory_exit(int s, void *base)
+{
+    uint8_t **mem = base;
+    free(*mem);
+    *mem = NULL;
 }
 
 
@@ -75,12 +86,12 @@ void fs_exit(int s, void *base)
     if(fs->fd) {
         munmap(fs->map, fs->len);
         close(fs->fd);
-        printf("Exit fs %s\n", fs->filename);
+        DEBUG_PRINTF("fs: Exit %s\n", fs->filename);
     }
 #else
     if(fs->fp) {
         fclose(fs->fp);
-        printf("Exit fs %s\n", fs->filename);
+        DEBUG_PRINTF("fs: Exit %s\n", fs->filename);
     }
 #endif
 }
@@ -94,13 +105,13 @@ uint32_t fs_reset(void *base)
 #ifdef FS_MMAP_MODE
         fs->fd = open(fs->filename, O_RDWR);
         if(fs->fd < 0) {
-            printf("Open %s: err\n", fs->filename);
+            ERROR_PRINTF("fs: Open %s: err\n", fs->filename);
             return ret;
         }
         fs->len = lseek(fs->fd, 0L, SEEK_END);
         fs->map = mmap(0, fs->len, PROT_READ | PROT_WRITE, MAP_SHARED, fs->fd, 0);
         if(fs->map == MAP_FAILED) {
-            printf("mmap %s: err\n", fs->filename);
+            ERROR_PRINTF("fs: mmap %s: err\n", fs->filename);
             close(fs->fd);
             return ret;
         }
@@ -108,7 +119,7 @@ uint32_t fs_reset(void *base)
 #else
         fs->fp = fopen(fs->filename, "rb+");
         if(fs->fp == NULL) {
-            printf("Open %s: err\n", fs->filename);
+            ERROR_PRINTF("fs: Open %s: err\n", fs->filename);
             return ret;
         }
         ret = 1;
@@ -197,7 +208,7 @@ uint32_t intc_read(void *base, uint32_t address)
     case 0x4:
         return intc->PND;
     default:
-        ;
+        break;
     }
     return 0;
 }
@@ -209,10 +220,12 @@ void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
     switch(address) {
     case 0x0:
         intc->MSK = data;
+        break;
     case 0x4:
         intc->PND = data;
+        break;
     default:
-        ;
+        break;
     }
 }
 
@@ -234,32 +247,16 @@ static uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id)
  * user_event: interrupt request
  * author:hxdyxd
  */
-uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, const uint32_t kips_speed)
+uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter)
 {
     uint32_t event = 0;
     struct interrupt_register *intc = &base->intc;
     struct timer_register *tim = &base->tim;
-    if(tim->EN && code_counter%kips_speed == 0 ) {
-        //timer enable, int_controler enable, cpsr_irq not disable
-        //per 10 millisecond timer irq
-        //kips_speed：Avoid calling GET_TICK functions frequently
-        static uint32_t tick_timer = 0;
-        uint32_t new_tick_timer = GET_TICK();
-        if(new_tick_timer - tick_timer >= 10) {
-#if 0
-            //Debug instructions per 10ms, kips_speed should be less than this value
-            static uint32_t code_counter_tmp = 0, slow_count = 0;
-            if(slow_count++ >= 100) {
-                slow_count = 0;
-                printf("i/10ms,%d\n", code_counter - code_counter_tmp);
-            }
-            code_counter_tmp = code_counter;
-#endif
-            tick_timer = new_tick_timer;
-            event = interrupt_happen(intc, tim->interrupt_id);
-            return event;
-        }
-    } else {
+    if(tim->EN && tim->CNT != tim->privious_cnt) {
+        tim->privious_cnt = tim->CNT;
+        event = interrupt_happen(intc, tim->interrupt_id);
+        return event;
+    } else if( (code_counter & 0xfff) == 0 ) {
         for(int i=0; i<UART_NUMBER; i++) {
             struct uart_register *uart = &base->uart[i];
             if(uart->IER&0xf) {
@@ -272,9 +269,7 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, cons
                         uart->IIR = UART_IIR_THRI; // THR empty interrupt pending
                     }
                     return event;
-                } else  if( (uart->IER & UART_IER_RDI) &&
-                 code_counter%kips_speed == (kips_speed/2) &&
-                  uart->readable() ) {
+                } else  if( (uart->IER & UART_IER_RDI) && uart->readable() ) {
                     //Avoid calling kbhit functions frequently
                     //Bit0, Enable Received Data Available Interrupt. 
                     if((event = interrupt_happen(intc, uart->interrupt_id)) != 0 ) {
@@ -293,13 +288,53 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter, cons
 
 /*******************************timer*****************************************/
 
+static void *tim_proc(void *base)
+{
+    struct timer_register *tim = base;
+    struct timeval timeout = {
+        .tv_sec = 0,
+        .tv_usec = 20,
+    };
+    prctl(PR_SET_NAME,"timer_task");
+    while(tim->is_run) {
+        timeout.tv_sec = 0;
+        timeout.tv_usec = tim->PERIOD;
+        int r = select(0, NULL, NULL, NULL, &timeout);;
+        if(tim->EN && r == 0) {
+            tim->CNT++;
+        }
+    }
+    tim->is_run = 0;
+    return NULL;
+}
+
+
+void tim_exit(int s, void *base)
+{
+    struct timer_register *tim = base;
+    if (tim->is_run) {
+        tim->is_run = 0;
+        pthread_join(tim->thread_id, 0);
+    } else {
+        ERROR_PRINTF("tim: task exit err!\n");
+    }
+}
+
 
 uint32_t tim_reset(void *base)
 {
     struct timer_register *tim = base;
     tim->CNT = 0x00000000;
     tim->EN =  0x00000000;
-    printf("tim interrupt id: %d\n", tim->interrupt_id);
+    tim->PERIOD = 10000;
+    DEBUG_PRINTF("tim: interrupt id: %d\n", tim->interrupt_id);
+
+    tim->is_run = 1;
+    tim->privious_cnt = 0;
+    if(pthread_create(&tim->thread_id, 0, tim_proc, tim) < 0) {
+        ERROR_PRINTF("tim: task err!\n");
+        return 0;
+    }
     return 1;
 }
 
@@ -309,8 +344,7 @@ uint32_t tim_read(void *base, uint32_t address)
     struct timer_register *tim = base;
     switch(address) {
     case 0x0:
-        tim->CNT = GET_TICK();
-        return tim->CNT;
+        return GET_TICK();
     case 0x4:
         return tim->EN;
     default:
@@ -325,9 +359,12 @@ void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
     struct timer_register *tim = base;
     switch(address) {
     case 0x0:
-        tim->CNT = data;
+        if(!tim->EN)
+            tim->CNT = data;
+        break;
     case 0x4:
         tim->EN = data;
+        break;
     default:
         ;
     }
@@ -357,7 +394,7 @@ uint32_t uart_8250_reset(void *base)
     uart->IIR = UART_IIR_NO_INT; //no interrupt pending
     uart->LSR = UART_LSR_TEMT | UART_LSR_THRE; //THR empty
     if(!uart->read || !uart->write) {
-        printf("uart_8250: function pointer = null\n");
+        ERROR_PRINTF("uart_8250: function pointer = null\n");
         return 0;
     }
     if(!uart->readable) {
@@ -366,7 +403,7 @@ uint32_t uart_8250_reset(void *base)
     if(!uart->writeable) {
         uart->writeable = uart_8250_rw_disable;
     }
-    printf("uart_8250 interrupt id: %d\n", uart->interrupt_id);
+    DEBUG_PRINTF("uart_8250: interrupt id: %d\n", uart->interrupt_id);
     return 1;
 }
 
@@ -418,7 +455,7 @@ uint32_t uart_8250_read(void *base, uint32_t address)
     case 0xf8:
         return 0;
     default:
-        printf("uart read %x\n", address);
+        ERROR_PRINTF("uart_8250: read %x\n", address);
     }
     return 0;
 }
@@ -488,7 +525,7 @@ void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
         //uart->SCR = data;
         break;
     default:
-        printf("uart write %x\n", address);
+        ERROR_PRINTF("uart_8250: write %x\n", address);
     }
 }
 
