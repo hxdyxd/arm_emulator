@@ -1,0 +1,3 @@
+[submodule "libslirp"]
+	path = libslirp
+	url = https://github.com/hxdyxd/libslirp.git
