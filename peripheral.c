@@ -252,11 +252,11 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter)
     uint32_t event = 0;
     struct interrupt_register *intc = &base->intc;
     struct timer_register *tim = &base->tim;
-    if(tim->EN && tim->CNT != tim->privious_cnt) {
+    if(tim->EN &&  tim->CNT - tim->privious_cnt >= 10 ) {
         tim->privious_cnt = tim->CNT;
         event = interrupt_happen(intc, tim->interrupt_id);
         return event;
-    } else if( (code_counter & 0xfff) == 0 ) {
+    } else {
         for(int i=0; i<UART_NUMBER; i++) {
             struct uart_register *uart = &base->uart[i];
             if(uart->IER&0xf) {
@@ -269,8 +269,8 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter)
                         uart->IIR = UART_IIR_THRI; // THR empty interrupt pending
                     }
                     return event;
-                } else  if( (uart->IER & UART_IER_RDI) && uart->readable() ) {
-                    //Avoid calling kbhit functions frequently
+                } else  if( (uart->IER & UART_IER_RDI) && 
+                     (code_counter & 0x7fff) == 0x4000 && uart->readable() ) {
                     //Bit0, Enable Received Data Available Interrupt. 
                     if((event = interrupt_happen(intc, uart->interrupt_id)) != 0 ) {
                         uart->IIR = UART_IIR_RDI; //received data available interrupt pending
@@ -291,15 +291,15 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter)
 static void *tim_proc(void *base)
 {
     struct timer_register *tim = base;
-    struct timeval timeout = {
-        .tv_sec = 0,
-        .tv_usec = 20,
-    };
+#ifdef USE_PRCTL_SET_THREAD_NAME
     prctl(PR_SET_NAME,"timer_task");
+#endif
+    struct timeval timeout;
+    timeout.tv_sec = 0;
+
     while(tim->is_run) {
-        timeout.tv_sec = 0;
         timeout.tv_usec = tim->PERIOD;
-        int r = select(0, NULL, NULL, NULL, &timeout);;
+        int r = select(0, NULL, NULL, NULL, &timeout);
         if(tim->EN && r == 0) {
             tim->CNT++;
         }
@@ -326,7 +326,7 @@ uint32_t tim_reset(void *base)
     struct timer_register *tim = base;
     tim->CNT = 0x00000000;
     tim->EN =  0x00000000;
-    tim->PERIOD = 10000;
+    tim->PERIOD = 1000;
     DEBUG_PRINTF("tim: interrupt id: %d\n", tim->interrupt_id);
 
     tim->is_run = 1;
@@ -344,7 +344,7 @@ uint32_t tim_read(void *base, uint32_t address)
     struct timer_register *tim = base;
     switch(address) {
     case 0x0:
-        return GET_TICK();
+        return tim->CNT;
     case 0x4:
         return tim->EN;
     default:

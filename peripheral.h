@@ -25,7 +25,12 @@
 #include <string.h>
 
 #include <pthread.h>
+
+#ifdef USE_PRCTL_SET_THREAD_NAME
 #include <sys/prctl.h>
+#endif
+#include <sys/select.h>
+
 /*******HAL*******/
 #include <time.h>
 #include <stdlib.h>

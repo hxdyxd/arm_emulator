@@ -18,7 +18,7 @@ slip_tun.o
 
 C_INCLUDES =  \
 -I.
-C_DEFS += -DTUN_SUPPORT -DFS_MMAP_MODE
+C_DEFS += -DTUN_SUPPORT -DFS_MMAP_MODE -DUSE_PRCTL_SET_THREAD_NAME
 CFLAGS += -O3 -Wall -std=gnu99 -g $(C_DEFS)
 LDFLAGS += -lpthread
 

@@ -20,15 +20,15 @@
 #include <armv4.h>
 #include <disassembly.h>
 #include <peripheral.h>
+
+#include <unistd.h>
+#include <signal.h>
+#include <slip_tun.h>
 #ifdef USE_WINAPI
 #include <conio.h>
 #else
 #include <conio_linux.h>
 #endif
-
-#include <unistd.h>
-#include <signal.h>
-#include <slip_tun.h>
 
 #define DEBUG_PRINTF     printf
 #define ERROR_PRINTF     printf
