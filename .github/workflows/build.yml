@@ -26,13 +26,6 @@ jobs:
         make V=1 STATIC=1
         ./armemulator -h
 
-    - name: CMake
-      run: |
-        mkdir build
-        cd build
-        cmake ..
-        make
-        ./armemulator -h
 
   build-macOS-latest:
     # The type of runner that the job will run on
@@ -46,12 +39,4 @@ jobs:
     - name: Makefile
       run: |
         make V=1 C_DEFS="-DFS_MMAP_MODE"
-        ./armemulator -h
-
-    - name: CMake
-      run: |
-        mkdir build
-        cd build
-        cmake -DTUN_SUPPORT=OFF ..
-        make
         ./armemulator -h

@@ -29,7 +29,7 @@
 #ifdef USE_PRCTL_SET_THREAD_NAME
 #include <sys/prctl.h>
 #endif
-#include <sys/select.h>
+#include <poll.h>
 
 /*******HAL*******/
 #include <time.h>
@@ -50,6 +50,16 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #endif
+
+/* return: 0 false ,1 true */
+struct charwr_interface {
+    uint8_t ( *init)(void);
+    void ( *exit)(void);
+    uint8_t ( *readable)(void);
+    uint8_t ( *read)(void);
+    uint8_t ( *writeable)(void);
+    uint8_t ( *write)(uint8_t ch);
+};
 
 struct peripheral_t {
     uint8_t *mem;
@@ -85,12 +95,10 @@ struct peripheral_t {
 
     struct uart_register {
         //predefined start
-        int ( *readable)(void);
-        int ( *read)(void);
-        int ( *writeable)(void);
-        int ( *write)(int ch);
+        int ( *interface_register_cb)(struct uart_register *uart);
         uint32_t interrupt_id;
         //predefined end
+        const struct charwr_interface *interface;
 
         uint32_t DLL; //Divisor Latch Low, 1
         uint32_t DLH; //Divisor Latch High, 2
@@ -174,11 +182,14 @@ uint32_t tim_reset(void *base);
 uint32_t tim_read(void *base, uint32_t address);
 void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 
-int uart_8250_rw_enable(void);
-int uart_8250_rw_disable(void);
+void uart_8250_exit(int s, void *base);
+void uart_8250_register(struct uart_register *uart, const struct charwr_interface *interface);
 uint32_t uart_8250_reset(void *base);
 uint32_t uart_8250_read(void *base, uint32_t address);
 void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
+
+uint8_t uart_8250_rw_enable(void);
+uint8_t uart_8250_rw_disable(void);
 
 
 #endif

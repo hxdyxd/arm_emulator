@@ -32,9 +32,6 @@
 extern uint8_t global_debug_flag;
 #define DEBUG                  (global_debug_flag)
 
-#define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
-#define WARN(...)  do{ if(1){printf(__VA_ARGS__);} }while(0)
-#define ERROR(...)  do{ if(1){printf(__VA_ARGS__);printf("Press any key to exit...\n");getchar();exit(-1);} }while(0)
 
 #define  IS_SET(v, bit) ( ((v)>>(bit))&1 )
 #define  SWAP_VAL(a,b) do{uint32_t tmp = a;a = b;b = tmp;}while(0)
@@ -150,6 +147,7 @@ struct armv4_cpu_t {
             uint32_t prefix;
             void *reg_base;
             uint32_t (*reset)(void *base);
+            void (*exit)(void *base);
             uint32_t (*read)(void *base, uint32_t address);
             void (*write)(void *base, uint32_t address, uint32_t data, uint8_t mask);
         }*link;
@@ -191,7 +189,7 @@ static uint8_t get_cpu_mode_code(struct armv4_cpu_t *cpu)
         break;
     default:
         cpu_mode = 0;
-        ERROR("cpu mode is unknown %x\r\n", cpsr_m(cpu));
+        printf("cpu mode is unknown %x\r\n", cpsr_m(cpu));
     }
     return cpu_mode;
 }

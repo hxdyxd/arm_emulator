@@ -38,9 +38,9 @@
 //struct ifreq ifr;
 #include <linux/if.h>
 
-
-#define DEBUG_PRINTF     printf
-#define ERROR_PRINTF     printf
+#define LOG_NAME   "tun"
+#define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
+#define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
 
 
 static int tun_task_init(void);
@@ -59,13 +59,8 @@ static pthread_mutex_t recv_mut;
 #endif
 
 
-static inline unsigned int slip_kfifo_unused(struct __kfifo *fifo)
-{
-    return (fifo->mask + 1) - (fifo->in - fifo->out);
-}
-
 /***********************extern*******************************/
-int slip_tun_init(void)
+static uint8_t slip_tun_init(void)
 {
     __kfifo_init(&send_fifo, send_fifo_buffer, FIFO_SIZE, 1);
     __kfifo_init(&recv_fifo, recv_fifo_buffer, FIFO_SIZE, 1);
@@ -80,19 +75,19 @@ int slip_tun_init(void)
     return 1;
 }
 
-void slip_tun_exit(void)
+static void slip_tun_exit(void)
 {
     tun_task_exit();
 }
 
 /* Non-blockable */
-int slip_tun_readable(void)
+static uint8_t slip_tun_readable(void)
 {
     return (send_fifo.in != send_fifo.out);
 }
 
 /* Non-blockable */
-int slip_tun_read(void)
+static uint8_t slip_tun_read(void)
 {
     uint8_t ch;
     __kfifo_out(&send_fifo, &ch, 1);
@@ -103,16 +98,16 @@ int slip_tun_read(void)
 }
 
 /* Non-blockable */
-int slip_tun_writeable(void)
+static uint8_t slip_tun_writeable(void)
 {
-    if(slip_kfifo_unused(&recv_fifo))
+    if(kfifo_unused(&recv_fifo))
         return 1;
     else
         return 0;
 }
 
 /* Non-blockable */
-int slip_tun_write(int ch)
+static uint8_t slip_tun_write(uint8_t ch)
 {
     __kfifo_in(&recv_fifo, &ch, 1);
 #ifdef TUN_MUTEX_MODE
@@ -120,6 +115,7 @@ int slip_tun_write(int ch)
 #endif
     return 0;
 }
+
 
 /***********************extern end*******************************/
 
@@ -194,12 +190,12 @@ static void *tun_task_proc(void *base)
     int total_len;
 
     prctl(PR_SET_NAME, s->thread_name);
-    DEBUG_PRINTF("tun: %s task enter success %d!\n", s->thread_name, s->fd);
+    DEBUG_PRINTF("%s task enter success %d!\n", s->thread_name, s->fd);
     while(s->is_run) {
         if(s->is_tun_out) {
             struct timeval timeout = {
-                .tv_sec = 1,
-                .tv_usec = 0,
+                .tv_sec = 0,
+                .tv_usec = 500000,
             };
             fd_set readset;
             FD_ZERO(&readset);
@@ -209,13 +205,13 @@ static void *tun_task_proc(void *base)
             if (r < 0) {
                 if(errno == EINTR)
                     continue;
-                ERROR_PRINTF("tun: %s select error\n", s->thread_name);
+                ERROR_PRINTF("%s select error\n", s->thread_name);
                 break;
             }
             if (FD_ISSET(s->fd, &readset)) {
                 int total_len = read(s->fd, s->buf, BUF_SIZE);
                 if (total_len < 0) {
-                    ERROR_PRINTF("tun: %s Reading from interface error\n", s->thread_name);
+                    ERROR_PRINTF("%s Reading from interface error\n", s->thread_name);
                     break;
                 }
                 
@@ -223,13 +219,16 @@ static void *tun_task_proc(void *base)
             }
         } else {
             //slip out
+            int wlen;
             total_len = recv_packet(s->buf, BUF_SIZE, &s->is_run);
-            write(s->fd, s->buf, total_len);
+            do {
+                wlen = write(s->fd, s->buf, total_len);
+            } while(wlen < 0 && wlen == EINTR);
         }
     }
 
     s->is_run = 0;
-    DEBUG_PRINTF("tun: %s task exit!\n", s->thread_name);
+    DEBUG_PRINTF("%s task exit!\n", s->thread_name);
     return NULL;
 }
 
@@ -247,7 +246,7 @@ static int tun_task_stop(struct slip_tun_status *s)
         s->is_run = 0;
         pthread_join(s->thread_id, 0);
     } else {
-        ERROR_PRINTF("tun: %s stop failed!\n", s->thread_name);
+        ERROR_PRINTF("%s stop failed!\n", s->thread_name);
         return -1;
     }
     return 0;
@@ -260,7 +259,7 @@ static int tun_task_init(void)
 {
     tun = (struct slip_tun *)malloc(sizeof(struct slip_tun));
     if(!tun) {
-        ERROR_PRINTF("tun: allocating err\n");
+        ERROR_PRINTF("allocating err\n");
         goto err0;
     }
 
@@ -316,7 +315,7 @@ static int tun_alloc(int flags)
     char *clonedev = "/dev/net/tun";
 
     if ((fd = open(clonedev, O_RDWR)) < 0) {
-        ERROR_PRINTF("tun: open %s err\n", clonedev);
+        ERROR_PRINTF("open %s err\n", clonedev);
         return fd;
     }
 
@@ -325,11 +324,11 @@ static int tun_alloc(int flags)
 
     if ((err = ioctl(fd, TUNSETIFF, (void *) &ifr)) < 0) {
         close(fd);
-        ERROR_PRINTF("tun: ioctl fd = %d err\n", fd);
+        ERROR_PRINTF("ioctl fd = %d err\n", fd);
         return err;
     }
 
-    DEBUG_PRINTF("tun: open tun/tap device: %s for reading...\n", ifr.ifr_name);
+    DEBUG_PRINTF("open tun/tap device: %s for reading...\n", ifr.ifr_name);
     return fd;
 }
 
@@ -466,34 +465,54 @@ static int recv_packet(unsigned char *p, int len, uint8_t *is_run)
 
 #else
 
-int slip_tun_init(void)
+//tun stub
+static int slip_tun_init(void)
 {
+    ERROR_PRINTF("tap is not supported in this build\n");
     return 1;
 }
 
-void slip_tun_exit(void)
+static void slip_tun_exit(void)
 {
 }
 
-int slip_tun_readable(void) 
+static int slip_tun_readable(void) 
 {
     return 0;
 }
 
-int slip_tun_read(void)
+static int slip_tun_read(void)
 {
     return 0;
 }
 
-int slip_tun_writeable(void)
+static int slip_tun_writeable(void)
 {
     return 1;
 }
 
-int slip_tun_write(int ch)
+static int slip_tun_write(int ch)
 {
     return 0;
 }
 #endif /*TUN_SUPPORT*/
+
+
+const static struct charwr_interface tun_interface = {
+    .init = slip_tun_init,
+    .exit = slip_tun_exit,
+    .readable = slip_tun_readable,
+    .read = slip_tun_read,
+    .writeable = slip_tun_writeable,
+    .write = slip_tun_write,
+};
+
+int slip_tun_register(struct uart_register *uart)
+{
+    uart_8250_register(uart, &tun_interface);
+    return 0;
+}
+
+
 
 /*****************************END OF FILE***************************/

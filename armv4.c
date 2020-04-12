@@ -20,6 +20,12 @@
 #include <disassembly.h>
 #include <assert.h>
 
+#define PRINTF(...)  do{ if(DEBUG){printf(__VA_ARGS__);} }while(0)
+#define WARN(...)  do{ if(1){printf(__VA_ARGS__);} }while(0)
+#define ERROR(...)  do{ if(1){printf(__VA_ARGS__);printf("Press any key to exit...\n");getchar();exit(-1);} }while(0)
+
+
+
 #define  BSET(b)  (1<<(b))
 #define  BMASK(v,m,r)  (((v)&(m)) == (r))
 

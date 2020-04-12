@@ -23,20 +23,26 @@
 
 #include <unistd.h>
 #include <signal.h>
+#include <console.h>
 #include <slip_tun.h>
-#ifdef USE_WINAPI
-#include <conio.h>
-#else
-#include <conio_linux.h>
-#endif
+#include <slip_user.h>
 
-#define DEBUG_PRINTF     printf
-#define ERROR_PRINTF     printf
+
+
+#define LOG_NAME   "emulator"
+#define PRINTF(...)           printf(LOG_NAME ": " __VA_ARGS__)
+#define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
+#define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
+
 
 
 #define USE_LINUX          0
 #define USE_BINARY         1
 #define USE_DISASSEMBLY    2
+
+#define USE_NET_USER       0
+#define USE_NET_TUN        1
+
 
 #define IMAGE_LOAD_ADDRESS   (0x8000)
 #define DTB_BASE_ADDRESS     (MEM_SIZE - 0x4000)
@@ -48,6 +54,7 @@
 
 static uint8_t step_by_step = 0;
 
+
 //peripheral register
 struct peripheral_t peripheral_reg_base = {
     .tim = {
@@ -56,24 +63,18 @@ struct peripheral_t peripheral_reg_base = {
     .uart = {
         {
             .interrupt_id = 1,
-            .readable = kbhit,
-            .read = getch,
-            .writeable = uart_8250_rw_enable,
-            .write = putchar,
+            .interface_register_cb = console_register,
         },
         {
             .interrupt_id = 2,
-            .readable = slip_tun_readable,
-            .read = slip_tun_read,
-            .writeable = slip_tun_writeable,
-            .write = slip_tun_write,
+            .interface_register_cb = slip_user_register,
         },
     },
 };
 
-#define PERIPHERAL_NUMBER    (6)
+#define SIZEOF_PERIPHERAL_CONFIG(cfg)    (sizeof(cfg)/sizeof(struct peripheral_link_t))
 //peripheral address & function config
-struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
+struct peripheral_link_t peripheral_config[] = {
     {
         .name = "Ram",
         .mask = ~(MEM_SIZE-1), //25bit
@@ -134,7 +135,8 @@ struct peripheral_link_t peripheral_config[PERIPHERAL_NUMBER] = {
 static void enable_step_by_step(int sig)
 {
     step_by_step = 1;
-    printf("\n[%s] step by step mode\n", step_by_step ? "x" : " ");
+    printf("\n");
+    PRINTF("[%s] step by step mode\n", step_by_step ? "x" : " ");
 }
 
 
@@ -143,6 +145,8 @@ static void peripheral_exit(void)
     fs_exit(0, &peripheral_reg_base.fs);
     tim_exit(0, &peripheral_reg_base.tim);
     memory_exit(0, &peripheral_reg_base.mem);
+    uart_8250_exit(0, &peripheral_reg_base.uart[0]);
+    uart_8250_exit(0, &peripheral_reg_base.uart[1]);
 }
 
 
@@ -167,7 +171,7 @@ uint32_t load_program_memory(struct armv4_cpu_t *cpu, const char *file_name, uin
         write_word(cpu, address, instruction);
         address = address + 4;
     }
-    printf("load mem base 0x%x, size %u\r\n", start, address - start - 4);
+    DEBUG_PRINTF("load mem base 0x%x, size %u\r\n", start, address - start - 4);
     fclose(fp);
     return address - start - 4;
 }
@@ -194,7 +198,7 @@ uint32_t load_disassembly(const char *file_name)
         printf(AS_CODE_FORMAT, address, instruction, code_buff);
         address = address + 4;
     }
-    printf("code size %u\n", address);
+    DEBUG_PRINTF("code size %u\n", address);
     fclose(fp);
     return address;
 }
@@ -268,9 +272,9 @@ void print_addr(struct armv4_cpu_t *cpu, char *ps)
             ps++;
         if(sscanf(ps, "%x", &printaddr) == 1) {
             uint32_t data = read_word_without_mmu(cpu, printaddr);
-            printf("p, *(0x%08x) = 0x%08x\n", printaddr, data);
+            PRINTF("p, *(0x%08x) = 0x%08x\n", printaddr, data);
             code_disassembly(data, printaddr, code_buff, AS_CODE_LEN);
-            printf("disassembly:\n");
+            PRINTF("disassembly:\n");
             printf(AS_CODE_FORMAT, printaddr, data, code_buff);
         }
         break;
@@ -280,19 +284,19 @@ void print_addr(struct armv4_cpu_t *cpu, char *ps)
         if(sscanf(ps, "%x", &printaddr) == 1) {
             uint32_t data = read_word(cpu, printaddr);
             if(!cpu->mmu.mmu_fault) {
-                printf("v, *(0x%08x) = 0x%08x\n", printaddr, data);
+                PRINTF("v, *(0x%08x) = 0x%08x\n", printaddr, data);
                 code_disassembly(data, printaddr, code_buff, AS_CODE_LEN);
-                printf("disassembly:\n");
+                PRINTF("disassembly:\n");
                 printf(AS_CODE_FORMAT, printaddr, data, code_buff);
             } else {
-                printf("v, *(0x%08x) mmu fault, fsr=0x%x\n",
+                PRINTF("v, *(0x%08x) mmu fault, fsr=0x%x\n",
                  printaddr, cp15_fsr(&cpu->mmu));
             }
         }
         break;
     default:
         --ps;
-        printf("unknown option p'%c', 0x%x\n", *ps, *ps);
+        PRINTF("unknown option p'%c', 0x%x\n", *ps, *ps);
         usage_s();
         break;
     }
@@ -308,7 +312,7 @@ static void clock_speed_detect(struct armv4_cpu_t *cpu, const uint8_t rt_debug)
         cpu->code_time = current_time - previous_time;
         previous_time = current_time;
         if(rt_debug) {
-            printf("[RT]: %u ms, %.6f MIPS\n", GET_TICK(),
+            PRINTF("[RT] %u ms, %.6f MIPS\n", GET_TICK(),
              (CLOCK_UPDATE_RATE+1)/(1000.0*cpu->code_time) );
         }
     }
@@ -322,12 +326,13 @@ int main(int argc, char **argv)
     uint8_t realtime_speed_show = 0;
     //default value
     uint8_t mode = USE_BINARY;
+    uint8_t net_mode = USE_NET_USER;
     char *image_path = NULL;
     char *dtb_path = NULL;
     int ch;
 
     peripheral_reg_base.fs.filename = NULL;
-    while((ch = getopt(argc, argv, "m:f:r:t:dshv")) != -1) {
+    while((ch = getopt(argc, argv, "m:n:f:r:t:dshv")) != -1) {
         switch(ch) {
         case 't':
             dtb_path = optarg;
@@ -346,7 +351,18 @@ int main(int argc, char **argv)
             } else if(optarg[0] == 'd' || strcmp(optarg, "disassembly") == 0) {
                 mode = USE_DISASSEMBLY;
             } else {
-                printf("unknown mode option :%s\n", optarg);
+                ERROR_PRINTF("unknown mode option :%s\n", optarg);
+                usage(argv[0]);
+                exit(-1);
+            }
+            break;
+        case 'n':
+            if(optarg[0] == 'u' || strcmp(optarg, "user") == 0) {
+                net_mode = USE_NET_USER;
+            } else if(optarg[0] == 't' || strcmp(optarg, "tun") == 0) {
+                net_mode = USE_NET_TUN;
+            } else {
+                ERROR_PRINTF("unknown net mode option :%s\n", optarg);
                 usage(argv[0]);
                 exit(-1);
             }
@@ -361,14 +377,14 @@ int main(int argc, char **argv)
         case 'h':
             usage(argv[0]);
             exit(0);
-        case '?': // 输入未定义的选项, 都会将该选项的值变为 ?
-            printf("unknown option \n");
+        case '?':
+            ERROR_PRINTF("unknown option \n");
             usage(argv[0]);
             exit(-1);
         }
     }
     if(!image_path) {
-        printf("parameter error \n");
+        ERROR_PRINTF("parameter error \n");
         usage(argv[0]);
         exit(-1);
     }
@@ -378,13 +394,21 @@ int main(int argc, char **argv)
     }
 
     signal(SIGINT, enable_step_by_step); //ctrl+b
-    kbhit();
 
-    atexit(slip_tun_exit);
-    slip_tun_init();
-    atexit(peripheral_exit);
+    switch(net_mode) {
+    case USE_NET_USER:
+        peripheral_reg_base.uart[1].interface_register_cb = slip_user_register;
+        break;
+    case USE_NET_TUN:
+        peripheral_reg_base.uart[1].interface_register_cb = slip_tun_register;
+        break;
+    default:
+        exit(-1);
+    }
+
     cpu_init(cpu);
-    peripheral_register(cpu, peripheral_config, PERIPHERAL_NUMBER);
+    peripheral_register(cpu, peripheral_config, SIZEOF_PERIPHERAL_CONFIG(peripheral_config));
+    atexit(peripheral_exit);
 
     switch(mode) {
     case USE_LINUX:
@@ -406,7 +430,7 @@ int main(int argc, char **argv)
     default:
         exit(-1);
     }
-    printf("Start...\n");
+    DEBUG_PRINTF("Start...\n");
 
     for(;;) {
         if(step_by_step) {
@@ -419,11 +443,12 @@ int main(int argc, char **argv)
             uint8_t cmd_len = 0;
 
             printf("\n[%u] cmd>", cpu->code_counter);
+            //console read
             for(cmd_len=0; cmd_len<64;) {
-                while(!kbhit()) {
+                while(!peripheral_reg_base.uart[0].interface->readable()) {
                     usleep(1000);
                 }
-                cmd_str[cmd_len] = getch();
+                cmd_str[cmd_len] = peripheral_reg_base.uart[0].interface->read();
                 if(cmd_str[cmd_len] == '\n' || cmd_str[cmd_len] == '\r') {
                     cmd_str[cmd_len] = 0;
                     if(cmd_len != 0)
@@ -447,7 +472,7 @@ int main(int argc, char **argv)
             char *ps = &cmd_str[0];
             switch(*ps++) {
             case 'm':
-                printf("MMU table base: 0x%08x\n", cpu->mmu.reg[2]);
+                PRINTF("MMU table base: 0x%08x\n", cpu->mmu.reg[2]);
                 for(int i=0; i<4096; i++) {
                     if(i && i % 16 == 0)
                         printf("\n");
@@ -458,7 +483,7 @@ int main(int argc, char **argv)
                 break;
             case 'd':
                 global_debug_flag = !global_debug_flag;
-                printf("[%s] debug info\n", global_debug_flag ? "x" : " ");
+                PRINTF("[%s] debug info\n", global_debug_flag ? "x" : " ");
                 break;
             case 'g':
                 reg_show(cpu);
@@ -475,21 +500,21 @@ int main(int argc, char **argv)
                 if(sscanf(ps, "%d", &skip_num) != 1) {
                     skip_num = 0;
                 }
-                printf("skip %d ...\n", skip_num);
+                PRINTF("skip %d ...\n", skip_num);
                 goto RUN;
                 break;
             case 's':
                 step_by_step = !step_by_step;
-                printf("[%s] step by step mode\n", step_by_step ? "x" : " ");
+                PRINTF("[%s] step by step mode\n", step_by_step ? "x" : " ");
                 break;
             case 't':
-                printf("Run time: %u ms\n", GET_TICK());
-                printf("Run speed: %u i/%u ms = %.3f MIPS\n", CLOCK_UPDATE_RATE, cpu->code_time,
+                PRINTF("Run time: %u ms\n", GET_TICK());
+                PRINTF("Run speed: %u i/%u ms = %.3f MIPS\n", CLOCK_UPDATE_RATE, cpu->code_time,
                  (CLOCK_UPDATE_RATE+1)/(1000.0*cpu->code_time) );
                 switch(*ps) {
                 case 's':
                     realtime_speed_show = !realtime_speed_show;
-                    printf("[%s] Show realtime clock speed\n", realtime_speed_show ? "x" : " ");
+                    PRINTF("[%s] Show realtime clock speed\n", realtime_speed_show ? "x" : " ");
                     break;
                 }
                 break;
@@ -498,13 +523,13 @@ int main(int argc, char **argv)
                 usage_s();
                 break;
             case 'q':
-                printf("quit\n");
+                PRINTF("quit\n");
                 exit(0);
                 break;
             case '\0':
                 break;
             default:
-                printf("unknown option '%c', 0x%x\n", cmd_str[0], cmd_str[0]);
+                ERROR_PRINTF("unknown option '%c', 0x%x\n", cmd_str[0], cmd_str[0]);
                 usage_s();
                 break;
             }
@@ -521,7 +546,7 @@ RUN:
         switch(cpu->decoder.event_id) {
         case EVENT_ID_UNDEF:
             interrupt_exception(cpu, INT_EXCEPTION_UNDEF);
-            printf("undef:%08x\n", cpu->decoder.instruction_word);
+            DEBUG_PRINTF("undef:%08x\n", cpu->decoder.instruction_word);
             break;
         case EVENT_ID_SWI:
             interrupt_exception(cpu, INT_EXCEPTION_SWI);

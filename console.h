@@ -1,5 +1,5 @@
 /*
- * slip_tun.h of arm_emulator
+ * console.h of arm_emulator
  * Copyright (C) 2019-2020  hxdyxd <hxdyxd@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -16,13 +16,13 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#ifndef _SLIP_TUN_H_
-#define _SLIP_TUN_H_
+#ifndef _CONSOLE_H_
+#define _CONSOLE_H_
 
 #include <stdint.h>
 #include <peripheral.h>
 
-int slip_tun_register(struct uart_register *uart);
+int console_register(struct uart_register *uart);
 
 
 #endif

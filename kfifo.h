@@ -77,6 +77,24 @@ struct __kfifo {
  */
 #define kfifo_size(fifo)    ((fifo)->kfifo.mask + 1)
 
+/*
+ * internal helper to calculate the unused elements in a fifo
+ */
+static inline unsigned int kfifo_unused(struct __kfifo *fifo)
+{
+    return (fifo->mask + 1) - (fifo->in - fifo->out);
+}
+
+/*
+ *  Determine whether some value is a power of two, where zero is
+ * *not* considered a power of two.
+ */
+
+static inline unsigned char is_power_of_2(unsigned long n)
+{
+    return (n != 0 && ((n & (n - 1)) == 0));
+}
+
 
 int __kfifo_alloc(struct __kfifo *fifo, unsigned int size,
         size_t esize, gfp_t gfp_mask);

@@ -17,9 +17,12 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include <peripheral.h>
+#include <assert.h>
 
-#define DEBUG_PRINTF     printf
-#define ERROR_PRINTF     printf
+#define LOG_NAME   "peripheral"
+#define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
+#define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
+
 
 
 /******************************memory*****************************************/
@@ -28,7 +31,7 @@ uint32_t memory_reset(void *base)
     uint8_t **mem = base;
     *mem = (uint8_t *)malloc(MEM_SIZE);
     if(!*mem) {
-        ERROR_PRINTF("memory: alloc err\n");
+        ERROR_PRINTF("memory alloc err\n");
         return 0;
     }
     return 1;
@@ -86,12 +89,12 @@ void fs_exit(int s, void *base)
     if(fs->fd) {
         munmap(fs->map, fs->len);
         close(fs->fd);
-        DEBUG_PRINTF("fs: Exit %s\n", fs->filename);
+        DEBUG_PRINTF("fs Exit %s\n", fs->filename);
     }
 #else
     if(fs->fp) {
         fclose(fs->fp);
-        DEBUG_PRINTF("fs: Exit %s\n", fs->filename);
+        DEBUG_PRINTF("fs Exit %s\n", fs->filename);
     }
 #endif
 }
@@ -105,13 +108,13 @@ uint32_t fs_reset(void *base)
 #ifdef FS_MMAP_MODE
         fs->fd = open(fs->filename, O_RDWR);
         if(fs->fd < 0) {
-            ERROR_PRINTF("fs: Open %s: err\n", fs->filename);
+            ERROR_PRINTF("fs Open %s: err\n", fs->filename);
             return ret;
         }
         fs->len = lseek(fs->fd, 0L, SEEK_END);
         fs->map = mmap(0, fs->len, PROT_READ | PROT_WRITE, MAP_SHARED, fs->fd, 0);
         if(fs->map == MAP_FAILED) {
-            ERROR_PRINTF("fs: mmap %s: err\n", fs->filename);
+            ERROR_PRINTF("fs mmap %s: err\n", fs->filename);
             close(fs->fd);
             return ret;
         }
@@ -119,7 +122,7 @@ uint32_t fs_reset(void *base)
 #else
         fs->fp = fopen(fs->filename, "rb+");
         if(fs->fp == NULL) {
-            ERROR_PRINTF("fs: Open %s: err\n", fs->filename);
+            ERROR_PRINTF("fs Open %s: err\n", fs->filename);
             return ret;
         }
         ret = 1;
@@ -263,14 +266,14 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter)
                 //uart enable
                 uart->IIR = UART_IIR_NO_INT; //no interrupt pending
                 //UART
-                if( (uart->IER & UART_IER_THRI) && uart->writeable() ) {
+                if( (uart->IER & UART_IER_THRI) && uart->interface->writeable() ) {
                     //Bit1, Enable Transmit Holding Register Empty Interrupt. 
                     if((event = interrupt_happen(intc, uart->interrupt_id)) != 0) {
                         uart->IIR = UART_IIR_THRI; // THR empty interrupt pending
                     }
                     return event;
                 } else  if( (uart->IER & UART_IER_RDI) && 
-                     (code_counter & 0x7fff) == 0x4000 && uart->readable() ) {
+                     (code_counter & 0x7fff) == 0x4000 && uart->interface->readable() ) {
                     //Bit0, Enable Received Data Available Interrupt. 
                     if((event = interrupt_happen(intc, uart->interrupt_id)) != 0 ) {
                         uart->IIR = UART_IIR_RDI; //received data available interrupt pending
@@ -294,17 +297,16 @@ static void *tim_proc(void *base)
 #ifdef USE_PRCTL_SET_THREAD_NAME
     prctl(PR_SET_NAME,"timer_task");
 #endif
-    struct timeval timeout;
-    timeout.tv_sec = 0;
+    DEBUG_PRINTF("timer task enter success!\n");
 
     while(tim->is_run) {
-        timeout.tv_usec = tim->PERIOD;
-        int r = select(0, NULL, NULL, NULL, &timeout);
+        int r = poll(NULL, 0, tim->PERIOD);
         if(tim->EN && r == 0) {
             tim->CNT++;
         }
     }
     tim->is_run = 0;
+    DEBUG_PRINTF("timer task exit!\n");
     return NULL;
 }
 
@@ -316,7 +318,7 @@ void tim_exit(int s, void *base)
         tim->is_run = 0;
         pthread_join(tim->thread_id, 0);
     } else {
-        ERROR_PRINTF("tim: task exit err!\n");
+        ERROR_PRINTF("timer task exit err!\n");
     }
 }
 
@@ -326,13 +328,13 @@ uint32_t tim_reset(void *base)
     struct timer_register *tim = base;
     tim->CNT = 0x00000000;
     tim->EN =  0x00000000;
-    tim->PERIOD = 1000;
-    DEBUG_PRINTF("tim: interrupt id: %d\n", tim->interrupt_id);
+    tim->PERIOD = 1;
+    DEBUG_PRINTF("timer interrupt id: %d\n", tim->interrupt_id);
 
     tim->is_run = 1;
     tim->privious_cnt = 0;
     if(pthread_create(&tim->thread_id, 0, tim_proc, tim) < 0) {
-        ERROR_PRINTF("tim: task err!\n");
+        ERROR_PRINTF("timer task err!\n");
         return 0;
     }
     return 1;
@@ -375,15 +377,22 @@ void tim_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
 
 /*******************************uart*****************************************/
 
-int uart_8250_rw_enable(void)
+uint8_t uart_8250_rw_enable(void)
 {
     return 1;
 }
 
 
-int uart_8250_rw_disable(void)
+uint8_t uart_8250_rw_disable(void)
 {
     return 0;
+}
+
+
+void uart_8250_register(struct uart_register *uart,
+ const struct charwr_interface *interface)
+{
+    uart->interface = interface;
 }
 
 
@@ -393,19 +402,29 @@ uint32_t uart_8250_reset(void *base)
     uart->IER = 0;
     uart->IIR = UART_IIR_NO_INT; //no interrupt pending
     uart->LSR = UART_LSR_TEMT | UART_LSR_THRE; //THR empty
-    if(!uart->read || !uart->write) {
-        ERROR_PRINTF("uart_8250: function pointer = null\n");
+    if(!uart->interface_register_cb) {
+        ERROR_PRINTF("uart_8250 interface_register_cb = null\n");
         return 0;
     }
-    if(!uart->readable) {
-        uart->readable = uart_8250_rw_disable;
-    }
-    if(!uart->writeable) {
-        uart->writeable = uart_8250_rw_disable;
-    }
-    DEBUG_PRINTF("uart_8250: interrupt id: %d\n", uart->interrupt_id);
+    if(uart->interface_register_cb(uart) < 0)
+        return 0;
+    if(!uart->interface->init)
+        return 0;
+    if(!uart->interface->init())
+        return 0;
+
+    DEBUG_PRINTF("uart_8250 interrupt id: %d\n", uart->interrupt_id);
     return 1;
 }
+
+
+void uart_8250_exit(int s, void *base)
+{
+    struct uart_register *uart = base;
+    if(uart->interface->exit)
+        uart->interface->exit();
+}
+
 
 
 uint32_t uart_8250_read(void *base, uint32_t address)
@@ -419,7 +438,7 @@ uint32_t uart_8250_read(void *base, uint32_t address)
             return uart->DLL;
         } else {
             //Receive Buffer Register
-            uart->RBR = uart->read();
+            uart->RBR = uart->interface->read();
             return uart->RBR;
         }
         break;
@@ -443,8 +462,8 @@ uint32_t uart_8250_read(void *base, uint32_t address)
         return uart->MCR;
     case 0x14:
         //Line Status Register, read-only
-        register_set(uart->LSR, 0, uart->readable()?1:0);
-        register_set(uart->LSR, 6, uart->writeable()?1:0);
+        register_set(uart->LSR, 0, uart->interface->readable()?1:0);
+        register_set(uart->LSR, 6, uart->interface->writeable()?1:0);
         return uart->LSR;
     case 0x18:
         //Modem Status Registe, read-only
@@ -455,7 +474,7 @@ uint32_t uart_8250_read(void *base, uint32_t address)
     case 0xf8:
         return 0;
     default:
-        ERROR_PRINTF("uart_8250: read %x\n", address);
+        ERROR_PRINTF("uart_8250 read %x\n", address);
     }
     return 0;
 }
@@ -472,7 +491,7 @@ void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
             uart->DLL = data;
         } else {
             //Transmit Holding Register
-            uart->write(data);
+            uart->interface->write(data);
         }
         break;
     case 0x4:
@@ -525,7 +544,7 @@ void uart_8250_write(void *base, uint32_t address, uint32_t data, uint8_t mask)
         //uart->SCR = data;
         break;
     default:
-        ERROR_PRINTF("uart_8250: write %x\n", address);
+        ERROR_PRINTF("uart_8250 write %x\n", address);
     }
 }
 
