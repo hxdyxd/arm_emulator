@@ -39,7 +39,15 @@
 #define IP_PACK(a,b,c,d) htonl( ((a)<<24) | ((b)<<16) | ((c)<<8) | (d))
 
 #define BUF_SIZE      (1800)
-#define FIFO_SIZE     (2048)
+
+/* value is a power of two */
+#define FIFO_SIZE     (4096)
+
+/* host forward addr */
+#define FWD_HOST_ADDR     (0)
+#define FWD_HOST_PORT     (8080)
+#define FWD_GUEST_ADDR    IP_PACK(10, 0, 0, 2)
+#define FWD_GUEST_PORT    (80)
 
 
 struct slip_user_t {
@@ -211,25 +219,15 @@ static int slirp_arp_input(struct slip_user_t *u, const void *buf, size_t len)
     struct ethhdr *eh = (struct ethhdr *)buf;
     struct slirp_arphdr *ah = (struct slirp_arphdr *)((uint8_t *)buf + ETH_HLEN);
     int ar_op = ntohs(ah->ar_op);
-    struct in_addr ipaddr = {
-        .s_addr = htonl(ah->ar_sip),
-    };
+
     switch(ar_op) {
     case ARPOP_REQUEST:
-        ipaddr.s_addr = ah->ar_sip;
-        DEBUG_PRINTF("REQUEST sip %s\n", inet_ntoa(ipaddr) );
-        ipaddr.s_addr = ah->ar_tip;
-        DEBUG_PRINTF("REQUEST tip %s\n", inet_ntoa(ipaddr) );
         memcpy(vhosthdr, ah->ar_sha, ETH_ALEN);
         slirp_arp_send(u, guesthdr, eh->h_source, 
             ah->ar_tip, ah->ar_sip, ARPOP_REPLY);
 
         break;
     case ARPOP_REPLY:
-        ipaddr.s_addr = ah->ar_sip;
-        DEBUG_PRINTF("REPLY sip %s\n", inet_ntoa(ipaddr) );
-        ipaddr.s_addr = ah->ar_tip;
-        DEBUG_PRINTF("REPLY tip %s\n", inet_ntoa(ipaddr) );
         break;
     default:
         ERROR_PRINTF("unknow arp pack %04x\n", ar_op);
@@ -253,8 +251,7 @@ static ssize_t net_slirp_send_packet(const void *buf, size_t len, void *opaque)
     int proto = (((uint16_t)pkt[12]) << 8) + pkt[13];
     switch(proto) {
     case ETH_P_ARP:
-        slirp_arp_input(u, buf, len);
-        break;
+        return slirp_arp_input(u, buf, len);
     case ETH_P_IP:
     case ETH_P_IPV6:
         return slirp_ip_input(u, buf, len);
@@ -310,8 +307,6 @@ static void net_slirp_notify(void *opaque)
     /* no net_slirp_notify */
 }
 
-
-
 static const SlirpCb slirp_cb = {
     .send_packet = net_slirp_send_packet,
     .guest_error = net_slirp_guest_error,
@@ -323,8 +318,6 @@ static const SlirpCb slirp_cb = {
     .unregister_poll_fd = net_slirp_unregister_poll_fd,
     .notify = net_slirp_notify,
 };
-
-
 
 
 static int add_poll(int fd, int events, void *opaque)
@@ -356,7 +349,6 @@ static int add_poll(int fd, int events, void *opaque)
     return idx;
 }
 
-
 static int get_revents(int idx, void *opaque)
 {
     struct slip_user_t *u = (struct slip_user_t *)opaque;
@@ -381,7 +373,6 @@ static int get_revents(int idx, void *opaque)
     return ret;
 }
 
-
 static void prepare_callback(struct slip_user_t *u)
 {
     slirp_pollfds_fill(u->slirp, &u->poll_timeout, add_poll, u);
@@ -391,14 +382,6 @@ static void prepare_callback(struct slip_user_t *u)
         slirp_ip_send(u, rlen);
         u->poll_timeout = 0;
         u->recv_time_cnt = u->timer_cnt;
-#if 0
-        struct in_addr sipaddr;
-        DEBUG_PRINTF("slip_recv ip %d, proto: %d, ", (int)rlen, u->slip_out_buf[ETH_HLEN+9]);
-        sipaddr.s_addr =  *((uint32_t *)(u->slip_out_buf+ETH_HLEN+12));
-        printf("s:%s, ", inet_ntoa(sipaddr)  );
-        sipaddr.s_addr =  *((uint32_t *)(u->slip_out_buf+ETH_HLEN+16));
-        printf("d:%s\n", inet_ntoa(sipaddr)  );
-#endif
     } else {
         if(u->poll_timeout != 1 && u->timer_cnt - u->recv_time_cnt >= 2) {
             u->poll_timeout = 1;
@@ -406,26 +389,15 @@ static void prepare_callback(struct slip_user_t *u)
     }
 }
 
-
 static void poll_callback(struct slip_user_t *u)
 {
     slirp_pollfds_poll(u->slirp, 0, get_revents, u);
 }
 
-
 static void timer_callback(struct slip_user_t *u)
 {
-#if 0
-    static uint32_t previous_timer_cnt = 0;
-    if(u->timer_cnt - previous_timer_cnt > 5000) {
-        previous_timer_cnt = u->timer_cnt;
-        DEBUG_PRINTF("unused(&recv) %d, unused(&send) %d\n", kfifo_unused(&u->recv), kfifo_unused(&u->send));
-    }
-#endif
+    /* do nothing */
 }
-
-
-
 
 static void *net_slirp_proc(void *base)
 {
@@ -458,8 +430,6 @@ static void *net_slirp_proc(void *base)
     return NULL;
 }
 
-
-
 static int net_slirp_init(struct slip_user_t *u)
 {
     SlirpConfig cfg = {
@@ -470,8 +440,8 @@ static int net_slirp_init(struct slip_user_t *u)
         .vhost = { .s_addr = IP_PACK(10, 0, 0, 1) },
         .vhostname = "slirp_vhost",
     };
-    struct in_addr fwd_host_addr = { .s_addr = 0 };
-    struct in_addr fwd_guest_addr = { .s_addr = IP_PACK(10, 0, 0, 2) };
+    struct in_addr fwd_host_addr = { .s_addr = FWD_HOST_ADDR };
+    struct in_addr fwd_guest_addr = { .s_addr = FWD_GUEST_ADDR };
 
     DEBUG_PRINTF("version %s\n", slirp_version_string());
 
@@ -482,7 +452,9 @@ static int net_slirp_init(struct slip_user_t *u)
     if(!u->slirp)
         goto err;
 
-    int r = slirp_add_hostfwd(u->slirp, 0, fwd_host_addr, 8080, fwd_guest_addr, 80);
+    DEBUG_PRINTF("hostfwd host addr %s:%d\n", inet_ntoa(fwd_host_addr), FWD_HOST_PORT);
+    DEBUG_PRINTF("hostfwd guest addr %s:%d\n", inet_ntoa(fwd_guest_addr), FWD_GUEST_PORT);
+    int r = slirp_add_hostfwd(u->slirp, 0, fwd_host_addr, FWD_HOST_PORT, fwd_guest_addr, FWD_GUEST_PORT);
     if(r < 0) {
         ERROR_PRINTF("add hostfwd err\n");
     }
@@ -508,7 +480,6 @@ err:
     return -1;
 }
 
-
 static void net_slirp_exit(struct slip_user_t *u)
 {
     if(u->slirp && u->gpollfds) {
@@ -524,8 +495,6 @@ static void net_slirp_exit(struct slip_user_t *u)
         g_array_free(u->gpollfds, TRUE);
     }
 }
-
-
 
 /* Blockable */
 static inline void send_char(int ch, uint8_t *is_run)
@@ -547,8 +516,6 @@ static inline void send_char_do(uint8_t *is_run)
 }
 
 
-
-
 #define FIFO_OUT_CHAR_PEEK(f,c,l)  __kfifo_out_peek_one(f,c,l)
 
 
@@ -558,7 +525,6 @@ static inline void send_char_do(uint8_t *is_run)
 #define ESC             0333    /* indicates byte stuffing */
 #define ESC_END         0334    /* ESC ESC_END means END data byte */
 #define ESC_ESC         0335    /* ESC ESC_ESC means ESC data byte */
-
 
 
 /* SEND_PACKET: sends a packet of length "len", starting at
@@ -606,17 +572,6 @@ static void slip_send_packet(uint8_t *p, int len, uint8_t *is_run)
     send_char(END, is_run);
     send_char_do(is_run);
 }
-
-
-void hex_dump(char *msg, uint8_t *buf, int len)
-{
-    DEBUG_PRINTF("[hex] %s:", msg);
-    for(int i=0;i<len;i++) {
-        printf("%02x, ", buf[i]);
-    }
-    printf("\n");
-}
-
 
 static int slip_recv_poll(struct slip_user_t *u, uint8_t *buf, int len)
 {

@@ -471,7 +471,7 @@ static int recv_packet(unsigned char *p, int len, uint8_t *is_run)
 #else
 
 //tun stub
-static int slip_tun_init(void)
+static uint8_t slip_tun_init(void)
 {
     ERROR_PRINTF("tap is not supported in this build\n");
     return 1;
@@ -481,22 +481,22 @@ static void slip_tun_exit(void)
 {
 }
 
-static int slip_tun_readable(void) 
+static uint8_t slip_tun_readable(void) 
 {
     return 0;
 }
 
-static int slip_tun_read(void)
+static uint8_t slip_tun_read(void)
 {
     return 0;
 }
 
-static int slip_tun_writeable(void)
+static uint8_t slip_tun_writeable(void)
 {
     return 1;
 }
 
-static int slip_tun_write(int ch)
+static uint8_t slip_tun_write(uint8_t ch)
 {
     return 0;
 }
