@@ -20,10 +20,13 @@ jobs:
     steps:
     # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
     - uses: actions/checkout@v2
+      with:
+        submodules: true
 
     - name: Makefile
       run: |
-        make V=1 STATIC=1
+        sudo apt install libglib2.0-dev
+        make V=1
         ./armemulator -h
 
 
@@ -35,8 +38,11 @@ jobs:
     steps:
     # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
     - uses: actions/checkout@v2
+      with:
+        submodules: true
 
     - name: Makefile
       run: |
+        brew install pkg-config glib
         make V=1 C_DEFS="-DFS_MMAP_MODE"
         ./armemulator -h

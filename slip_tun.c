@@ -21,12 +21,20 @@
 #include <string.h>
 #include <slip_tun.h>
 
+#define LOG_NAME   "tun"
+#define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
+#define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
+
+
 
 #ifdef TUN_SUPPORT
 #include <kfifo.h>
 
 #include <pthread.h>
+#ifdef USE_PRCTL_SET_THREAD_NAME
 #include <sys/prctl.h>
+#endif
+
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/ioctl.h>
@@ -37,10 +45,6 @@
 
 //struct ifreq ifr;
 #include <linux/if.h>
-
-#define LOG_NAME   "tun"
-#define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
-#define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
 
 
 static int tun_task_init(void);
@@ -188,8 +192,9 @@ static void *tun_task_proc(void *base)
 {
     struct slip_tun_status *s = (struct slip_tun_status *)base;
     int total_len;
-
+#ifdef USE_PRCTL_SET_THREAD_NAME
     prctl(PR_SET_NAME, s->thread_name);
+#endif
     DEBUG_PRINTF("%s task enter success %d!\n", s->thread_name, s->fd);
     while(s->is_run) {
         if(s->is_tun_out) {

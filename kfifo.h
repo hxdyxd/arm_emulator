@@ -107,6 +107,7 @@ unsigned int __kfifo_out_peek(struct __kfifo *fifo,
         void *buf, unsigned int len);
 unsigned int __kfifo_out(struct __kfifo *fifo,
         void *buf, unsigned int len);
-
+unsigned int __kfifo_out_peek_one(struct __kfifo *fifo,
+        void *buf, unsigned int len);
 
 #endif

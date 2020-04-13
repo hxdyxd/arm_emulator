@@ -11,7 +11,7 @@ Simple armv4 emulator with embedded freertos and linux operating system support
 * Interrupts (timer interrupt, 8250 serial interrupts)  
 * Prefetch Abort, Data Abort, Undefined instruction, IRQ ,FIQ exceptions  
 * CP15 coprocessor, Memory Management Unit(MMU) and Translation Lookaside Buffer(TLB)  
-* Network support via serial port and TUN/TAP devices for host  
+* Network support via serial port  
 * Console support via serial port  
 * Step by step running  
 * Disassembler  
@@ -46,13 +46,14 @@ Run linux kernel
        -f <image_path>            Set image or binary programme file path.
        [-r <romfs_path>]          Set ROM filesystem path.
        [-t <device_tree_path>]    Set Devices tree path.
+       [-n <net_mode>]            Select 'user' or 'tun' network mode, default is 'user'.
        [-d]                       Display debug message.
        [-s]                       Step by step mode.
 
        [-v]                       Verbose mode.
        [-h, --help]               Print this message.
 
-  Build , [time] 
+  Build , [time]
   Reference: https://github.com/hxdyxd/arm_emulator
 
 ```
@@ -78,7 +79,7 @@ Step by step mode command:
 ## Build armemulator
 
 ```
-make V=1 STATIC=1
+make
 sudo make install
 ```
 

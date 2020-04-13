@@ -179,3 +179,39 @@ unsigned int __kfifo_out(struct __kfifo *fifo,
     fifo->out += len;
     return len;
 }
+
+
+static void kfifo_copy_out_one(struct __kfifo *fifo, void *dst,
+        unsigned int len, unsigned int off)
+{
+    unsigned int size = fifo->mask + 1;
+    unsigned int esize = fifo->esize;
+    unsigned int l;
+
+    off &= fifo->mask;
+    if (esize != 1) {
+        off *= esize;
+        size *= esize;
+        len *= esize;
+    }
+    l = min(len, size - off);
+
+    if(l)
+        memcpy(dst, (unsigned char *)(fifo->data + off) + l - esize, esize);
+    if(len - l)
+        memcpy(dst, (unsigned char *)(fifo->data) + (len - l) - esize, esize);
+}
+
+
+unsigned int __kfifo_out_peek_one(struct __kfifo *fifo,
+        void *buf, unsigned int len)
+{
+    unsigned int l;
+
+    l = fifo->in - fifo->out;
+    if (len > l)
+        len = l;
+
+    kfifo_copy_out_one(fifo, buf, len, fifo->out);
+    return len;
+}

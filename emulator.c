@@ -219,6 +219,8 @@ void usage(const char *file)
     printf(
         "       [-t <device_tree_path>]    Set Devices tree path.\n");
     printf(
+        "       [-n <net_mode>]            Select 'user' or 'tun' network mode, default is 'user'.\n");
+    printf(
         "       [-d]                       Display debug message.\n");
     printf(
         "       [-s]                       Step by step mode.\n");

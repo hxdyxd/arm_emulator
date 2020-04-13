@@ -5,6 +5,7 @@ AR = $(CROSS_COMPILE)ar
 LD = $(CC)
 INSTALL = install
 RM = rm
+PKG_CONFIG ?= pkg-config
 
 TARGET = armemulator
 
@@ -25,9 +26,11 @@ C_INCLUDES =  \
 
 C_DEFS += -DTUN_SUPPORT -DFS_MMAP_MODE -DUSE_PRCTL_SET_THREAD_NAME
 CFLAGS += -O3 -Wall -std=gnu99 -g $(C_DEFS)
+CFLAGS += $(shell $(PKG_CONFIG) --cflags glib-2.0)
 
 LDFLAGS += libslirp/libslirp.a
-LDFLAGS += -lpthread -lglib-2.0 -lev
+LDFLAGS += $(shell $(PKG_CONFIG) --libs glib-2.0)
+LDFLAGS += -lpthread
 
 
 
