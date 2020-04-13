@@ -396,6 +396,7 @@ int main(int argc, char **argv)
     }
 
     signal(SIGINT, enable_step_by_step); //ctrl+b
+    signal(SIGPIPE, SIG_IGN);
 
     switch(net_mode) {
     case USE_NET_USER:

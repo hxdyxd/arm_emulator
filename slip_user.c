@@ -400,7 +400,7 @@ static void prepare_callback(struct slip_user_t *u)
         printf("d:%s\n", inet_ntoa(sipaddr)  );
 #endif
     } else {
-        if(u->poll_timeout == 0 && u->timer_cnt - u->recv_time_cnt >= 2) {
+        if(u->poll_timeout != 1 && u->timer_cnt - u->recv_time_cnt >= 2) {
             u->poll_timeout = 1;
         }
     }
@@ -415,12 +415,13 @@ static void poll_callback(struct slip_user_t *u)
 
 static void timer_callback(struct slip_user_t *u)
 {
+#if 0
     static uint32_t previous_timer_cnt = 0;
     if(u->timer_cnt - previous_timer_cnt > 5000) {
         previous_timer_cnt = u->timer_cnt;
         DEBUG_PRINTF("unused(&recv) %d, unused(&send) %d\n", kfifo_unused(&u->recv), kfifo_unused(&u->send));
-        DEBUG_PRINTF("slirp_pollfds_fill timeout %d\n", u->poll_timeout);
     }
+#endif
 }
 
 
