@@ -16,8 +16,19 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <slip_user.h>
+#include <config.h>
 
+#define LOG_NAME   "slirp"
+#define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
+#define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
+
+
+
+#ifdef USE_SLIRP_SUPPORT
 #include <stddef.h>
 #include <errno.h>
 #include <glib.h>
@@ -26,16 +37,12 @@
 #include <libslirp.h>
 #include <time.h>
 #include <pthread.h>
-#include <config.h>
 
 
 #ifdef USE_PRCTL_SET_THREAD_NAME
 #include <sys/prctl.h>
 #endif
 
-#define LOG_NAME   "slirp"
-#define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
-#define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
 
 #define container_of(ptr, type, member) ((void *)((char *)(ptr) - offsetof(type, member)))
 #define IP_PACK(a,b,c,d) htonl( ((a)<<24) | ((b)<<16) | ((c)<<8) | (d))
@@ -115,21 +122,6 @@ static uint8_t slip_user_writeable(void)
 static uint8_t slip_user_write(uint8_t ch)
 {
     __kfifo_in(&slip_user.recv, &ch, 1);
-    return 0;
-}
-
-const static struct charwr_interface slip_user_interface = {
-    .init = slip_user_init,
-    .exit = slip_user_exit,
-    .readable = slip_user_readable,
-    .read = slip_user_read,
-    .writeable = slip_user_writeable,
-    .write = slip_user_write,
-};
-
-int slip_user_register(struct uart_register *uart)
-{
-    uart_8250_register(uart, &slip_user_interface);
     return 0;
 }
 
@@ -616,5 +608,55 @@ static int slip_recv_poll(struct slip_user_t *u, uint8_t *buf, int len)
     }
     return 0;
 }
+
+#else /* !USE_SLIRP_SUPPORT */
+
+//tun stub
+static uint8_t slip_tun_init(void)
+{
+    ERROR_PRINTF("slirp is not supported in this build\n");
+    return 1;
+}
+
+static void slip_user_exit(void)
+{
+}
+
+static uint8_t slip_user_readable(void) 
+{
+    return 0;
+}
+
+static uint8_t slip_user_read(void)
+{
+    return 0;
+}
+
+static uint8_t slip_user_writeable(void)
+{
+    return 1;
+}
+
+static uint8_t slip_user_write(uint8_t ch)
+{
+    return 0;
+}
+#endif /* USE_SLIRP_SUPPORT */
+
+const static struct charwr_interface slip_user_interface = {
+    .init = slip_user_init,
+    .exit = slip_user_exit,
+    .readable = slip_user_readable,
+    .read = slip_user_read,
+    .writeable = slip_user_writeable,
+    .write = slip_user_write,
+};
+
+int slip_user_register(struct uart_register *uart)
+{
+    uart_8250_register(uart, &slip_user_interface);
+    return 0;
+}
+
 
 /**************************END OF FILE*****************************/

@@ -28,7 +28,7 @@
 
 
 
-#ifdef TUN_SUPPORT
+#ifdef USE_TUN_SUPPORT
 #include <kfifo.h>
 
 #include <pthread.h>
@@ -469,7 +469,7 @@ static int recv_packet(unsigned char *p, int len, uint8_t *is_run)
 }
 
 
-#else
+#else /* !USE_TUN_SUPPORT */
 
 //tun stub
 static uint8_t slip_tun_init(void)
@@ -501,7 +501,7 @@ static uint8_t slip_tun_write(uint8_t ch)
 {
     return 0;
 }
-#endif /*TUN_SUPPORT*/
+#endif /* USE_TUN_SUPPORT */
 
 
 const static struct charwr_interface tun_interface = {

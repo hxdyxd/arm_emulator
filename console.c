@@ -20,17 +20,20 @@
 
 #include <stdio.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <sys/ioctl.h>
-#include <termios.h>
-#include <unistd.h>
-#include <fcntl.h>
+#include <config.h>
 
 #define LOG_NAME   "console"
 #define PRINTF(...)           printf(LOG_NAME ": " __VA_ARGS__)
 #define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
 #define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
 
+
+#ifdef USE_UNIX_TERMINAL_API
+#include <stdlib.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
+#include <fcntl.h>
 
 
 static struct termios conio_orig_termios;
@@ -98,6 +101,24 @@ static uint8_t getch(void)
 
     return ch;
 }
+
+
+#else /* !USE_UNIX_TERMINAL_API */
+
+#include <conio.h>
+
+static void disable_raw_mode(void)
+{
+
+}
+
+static uint8_t enable_raw_mode(void)
+{
+
+}
+
+#endif /* USE_UNIX_TERMINAL_API */
+
 
 static uint8_t putch(uint8_t ch)
 {

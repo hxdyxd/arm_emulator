@@ -21,10 +21,14 @@
 
 #ifdef __linux__
 #define USE_PRCTL_SET_THREAD_NAME
-#define TUN_SUPPORT
+#define USE_TUN_SUPPORT
 #endif
 
+#define USE_SLIRP_SUPPORT
 #define FS_MMAP_MODE
 
-
+#ifndef _WIN32
+#define USE_UNIX_TERMINAL_API
 #endif
+
+#endif /*_CONFIG_H_*/

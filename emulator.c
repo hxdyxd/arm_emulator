@@ -234,7 +234,10 @@ void usage(const char *file)
 #ifdef FS_MMAP_MODE
         "mmap "
 #endif
-#ifdef TUN_SUPPORT
+#ifdef USE_SLIRP_SUPPORT
+        "slirp "
+#endif
+#ifdef USE_TUN_SUPPORT
         "tun "
 #endif
         "\n");
