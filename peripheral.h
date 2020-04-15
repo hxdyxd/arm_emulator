@@ -24,6 +24,7 @@
 #include <stdint.h>
 #include <time.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <config.h>
 
 #define  GET_TICK()   (uint32_t)(clock() / (CLOCKS_PER_SEC/1000))

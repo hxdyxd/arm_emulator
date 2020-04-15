@@ -19,7 +19,6 @@
 #include <peripheral.h>
 #include <string.h>
 #include <assert.h>
-#include <pthread.h>
 #include <poll.h>
 
 #ifdef USE_PRCTL_SET_THREAD_NAME
