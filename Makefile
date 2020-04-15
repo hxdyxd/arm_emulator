@@ -16,15 +16,15 @@ armv4.o\
 peripheral.o\
 kfifo.o\
 slip_tun.o\
-slip_user.o
-
-OBJS += console.o
+slip_user.o\
+console.o
 
 C_INCLUDES =  \
 -I .\
 -I libslirp/src
 
-C_DEFS += -DTUN_SUPPORT -DFS_MMAP_MODE -DUSE_PRCTL_SET_THREAD_NAME
+GIT_TAGS = $(shell git describe --tags)
+CFLAGS += -DARMEMULATOR_VERSION_STRING=\"$(GIT_TAGS)\"
 CFLAGS += -O3 -Wall -std=gnu99 -g $(C_DEFS)
 CFLAGS += $(shell $(PKG_CONFIG) --cflags glib-2.0)
 

@@ -79,6 +79,8 @@ Step by step mode command:
 ## Build armemulator
 
 ```
+sudo apt-get install pkg-config libglib2.0-dev
+git clone --recursive https://github.com/hxdyxd/arm_emulator.git
 make
 sudo make install
 ```

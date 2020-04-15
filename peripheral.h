@@ -22,21 +22,13 @@
 
 #include <stdio.h>
 #include <stdint.h>
-#include <string.h>
-
-#include <pthread.h>
-
-#ifdef USE_PRCTL_SET_THREAD_NAME
-#include <sys/prctl.h>
-#endif
-#include <poll.h>
-
-/*******HAL*******/
 #include <time.h>
 #include <stdlib.h>
+#include <config.h>
 
 #define  GET_TICK()   (uint32_t)(clock() / (CLOCKS_PER_SEC/1000))
-/*******HAL END*******/
+
+
 
 #ifndef MEM_SIZE
 #define MEM_SIZE   (1 << 25)  //32M

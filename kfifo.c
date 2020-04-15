@@ -25,7 +25,7 @@
 
 #include <stdlib.h>
 #define kmalloc(a,b) malloc(a)
-#define kfree free
+#define kfree(a)     free(a)
 
 
 #define min(a,b) ((a)<(b)?(a):(b))

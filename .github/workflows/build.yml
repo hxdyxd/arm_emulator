@@ -25,7 +25,7 @@ jobs:
 
     - name: Makefile
       run: |
-        sudo apt install libglib2.0-dev
+        sudo apt install pkg-config libglib2.0-dev
         make V=1
         ./armemulator -h
 
@@ -44,5 +44,5 @@ jobs:
     - name: Makefile
       run: |
         brew install pkg-config glib
-        make V=1 C_DEFS="-DFS_MMAP_MODE"
+        make V=1
         ./armemulator -h

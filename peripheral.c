@@ -17,7 +17,14 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 #include <peripheral.h>
+#include <string.h>
 #include <assert.h>
+#include <pthread.h>
+#include <poll.h>
+
+#ifdef USE_PRCTL_SET_THREAD_NAME
+#include <sys/prctl.h>
+#endif
 
 #define LOG_NAME   "peripheral"
 #define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
@@ -262,7 +269,7 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter)
     } else {
         for(int i=0; i<UART_NUMBER; i++) {
             struct uart_register *uart = &base->uart[i];
-            if(uart->IER&0xf) {
+            if(uart->IER & 0xf) {
                 //uart enable
                 uart->IIR = UART_IIR_NO_INT; //no interrupt pending
                 //UART

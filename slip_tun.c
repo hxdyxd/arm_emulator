@@ -20,6 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <slip_tun.h>
+#include <config.h>
 
 #define LOG_NAME   "tun"
 #define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)

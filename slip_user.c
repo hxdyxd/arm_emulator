@@ -18,18 +18,20 @@
  */
 #include <slip_user.h>
 
-
-#include <kfifo.h>
-#include <libslirp.h>
-#include <time.h>
-#include <pthread.h>
-#ifdef USE_PRCTL_SET_THREAD_NAME
-#include <sys/prctl.h>
-#endif
 #include <stddef.h>
 #include <errno.h>
 #include <glib.h>
 #include <poll.h>
+#include <kfifo.h>
+#include <libslirp.h>
+#include <time.h>
+#include <pthread.h>
+#include <config.h>
+
+
+#ifdef USE_PRCTL_SET_THREAD_NAME
+#include <sys/prctl.h>
+#endif
 
 #define LOG_NAME   "slirp"
 #define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)

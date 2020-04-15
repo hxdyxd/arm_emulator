@@ -26,7 +26,7 @@
 #include <console.h>
 #include <slip_tun.h>
 #include <slip_user.h>
-
+#include <config.h>
 
 
 #define LOG_NAME   "emulator"
@@ -230,8 +230,16 @@ void usage(const char *file)
     printf(
         "       [-h, --help]               Print this message.\n");
     printf("\n");
-    printf("  Build , %s %s \n", __DATE__, __TIME__);
-    printf("  Reference: https://github.com/hxdyxd/arm_emulator\n");
+    printf("  features: "
+#ifdef FS_MMAP_MODE
+        "mmap "
+#endif
+#ifdef TUN_SUPPORT
+        "tun "
+#endif
+        "\n");
+    printf("  build: %s %s %s \n", ARMEMULATOR_VERSION_STRING, __DATE__, __TIME__);
+    printf("  reference: https://github.com/hxdyxd/arm_emulator\n");
 }
 
 
