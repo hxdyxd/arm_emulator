@@ -27,7 +27,7 @@
 #include <slip_tun.h>
 #include <slip_user.h>
 #include <config.h>
-
+#include <loop.h>
 
 #define LOG_NAME   "emulator"
 #define PRINTF(...)           printf(LOG_NAME ": " __VA_ARGS__)
@@ -131,17 +131,37 @@ struct peripheral_link_t peripheral_config[] = {
     }
 };
 
-
-static void enable_step_by_step(int sig)
+/* from loop thread */
+static int term_process(uint8_t escape_char, uint8_t ch)
 {
-    step_by_step = 1;
     printf("\n");
-    PRINTF("[%s] step by step mode\n", step_by_step ? "x" : " ");
+    switch(ch) {
+    case 's':
+        step_by_step = 1;
+        PRINTF("[%s] step by step mode\n", step_by_step ? "x" : " ");
+        break;
+    case 'd':
+    case 'g':
+    case 'p':
+    case 't':
+    case 'q':
+        step_by_step = 1;
+        PRINTF("[%s] step by step mode\n", step_by_step ? "x" : " ");
+        return 1;
+    default:
+        ERROR_PRINTF("undefined escape option '%c', 0x%x\n", ch, ch);
+        printf("ctrl+b q         quit program\n");
+        printf("ctrl+b s         enable step by step mode\n");
+        printf("ctrl+b ctrl+b    sends ctrl+b\n");
+        break;
+    }
+    return 0;
 }
 
 
 static void peripheral_exit(void)
 {
+    loop_exit(&loop_default);
     fs_exit(0, &peripheral_reg_base.fs);
     tim_exit(0, &peripheral_reg_base.tim);
     memory_exit(0, &peripheral_reg_base.mem);
@@ -261,7 +281,7 @@ void usage_s(void)
     printf(
         "       g                Print register table\n");
     printf(
-        "       s                Set step by step flag, press ctrl+b to clear\n");
+        "       s                Set step by step flag, press ctrl+b s to clear\n");
     printf(
         "       p[p|v] [a]       Print physical/virtual address at 0x[a]\n");
     printf(
@@ -406,9 +426,6 @@ int main(int argc, char **argv)
         exit(0);
     }
 
-    signal(SIGINT, enable_step_by_step); //ctrl+b
-    signal(SIGPIPE, SIG_IGN);
-
     switch(net_mode) {
     case USE_NET_USER:
         peripheral_reg_base.uart[1].interface_register_cb = slip_user_register;
@@ -420,9 +437,16 @@ int main(int argc, char **argv)
         exit(-1);
     }
 
+    signal(SIGPIPE, SIG_IGN);
+    if(loop_init(&loop_default) < 0)
+        exit(-1);
+
     cpu_init(cpu);
     peripheral_register(cpu, peripheral_config, SIZEOF_PERIPHERAL_CONFIG(peripheral_config));
     atexit(peripheral_exit);
+    console_term_register(term_process);
+    if(loop_start(&loop_default) < 0)
+        exit(-1);
 
     switch(mode) {
     case USE_LINUX:
@@ -543,7 +567,7 @@ int main(int argc, char **argv)
             case '\0':
                 break;
             default:
-                ERROR_PRINTF("unknown option '%c', 0x%x\n", cmd_str[0], cmd_str[0]);
+                ERROR_PRINTF("undefined option '%c', 0x%x\n", cmd_str[0], cmd_str[0]);
                 usage_s();
                 break;
             }

@@ -23,7 +23,7 @@
 #include <peripheral.h>
 
 int console_register(struct uart_register *uart);
-
+void console_term_register(int (*term)(uint8_t escape_char, uint8_t ch));
 
 #endif
 /*****************************END OF FILE***************************/

@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <assert.h>
 #include <config.h>
 
 #define LOG_NAME   "console"
@@ -34,10 +35,29 @@
 #include <termios.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <loop.h>
+#include <kfifo.h>
 
+
+#define CONSOLE_FIFO_SIZE   (16)
 
 static struct termios conio_orig_termios;
 static int conio_oldf;
+static uint8_t term_escape_char = 'b' & 0x9f; /* ctrl-b is used for escape */
+
+struct console_status_t {
+    int idx;
+    struct __kfifo recv;
+    uint8_t recv_buf[CONSOLE_FIFO_SIZE];
+    uint8_t term_got_escape;
+    int (*term)(uint8_t escape_char, uint8_t ch);
+};
+
+
+static struct console_status_t con_default = {
+    .idx = 0,
+    .term = NULL,
+};
 
 static void disable_raw_mode(void)
 {
@@ -45,14 +65,67 @@ static void disable_raw_mode(void)
     fcntl(STDIN_FILENO, F_SETFL, conio_oldf);
 }
 
+static int console_escape_proc_byte(struct console_status_t *c, uint8_t ch)
+{
+    if (c->term_got_escape) {
+        c->term_got_escape = 0;
+        if (ch == term_escape_char) {
+            goto send_char;
+        } else if(c->term) {
+            return c->term(term_escape_char, ch);
+        }
+    } else if (ch == term_escape_char) {
+        c->term_got_escape = 1;
+    } else {
+send_char:
+        return 1;
+    }
+    return 0;
+}
+
+static void console_prepare_callback(void *opaque)
+{
+    struct console_status_t *c = (struct console_status_t *)opaque;
+    c->idx = loop_add_poll(&loop_default, STDIN_FILENO, POLLIN);
+}
+
+static void console_poll_callback(void *opaque)
+{
+    struct console_status_t *c = (struct console_status_t *)opaque;
+    int revents = loop_get_revents(&loop_default, c->idx);
+    if(revents & POLLIN) {
+        int ch;
+        if(read(STDIN_FILENO, &ch, 1) == 1) {
+            if(!console_escape_proc_byte(c, ch))
+                return;
+            while(__kfifo_in(&c->recv, &ch, 1) == 0 && LOOP_IS_RUN(&loop_default)) {
+                poll(NULL, 0, 1);
+            }
+        }
+    }
+}
+
+
+static const struct loopcb_t loop_console_cb = {
+    .prepare = console_prepare_callback,
+    .poll = console_poll_callback,
+    .timer = NULL,
+    .opaque = &con_default,
+};
+
 static uint8_t enable_raw_mode(void)
 {
     tcgetattr(STDIN_FILENO, &conio_orig_termios);
     struct termios term = conio_orig_termios;
-    term.c_lflag &= ~(ICANON | ECHO); // Disable echo as well
-    term.c_cc[VINTR] = 'b' & 0x9f; //^B
-    term.c_cc[VSUSP] = 0; //undef
-    term.c_cc[VQUIT] = 0; //undef
+    term.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP
+                         | INLCR | IGNCR | ICRNL | IXON);
+    term.c_oflag |= OPOST;
+    term.c_lflag &= ~(ICANON | ECHONL | ECHO | IEXTEN); // Disable echo as well
+    term.c_cflag &= ~(CSIZE | PARENB);
+    term.c_cflag |= CS8;
+    term.c_cc[VMIN] = 1;
+    term.c_cc[VTIME] = 0;
+    term.c_lflag &= ~ISIG;
     if(tcsetattr(STDIN_FILENO, TCSANOW, &term) < 0) {
         ERROR_PRINTF("set attr err\n");
         return 0;
@@ -60,45 +133,23 @@ static uint8_t enable_raw_mode(void)
 
     conio_oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, conio_oldf | O_NONBLOCK);
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stdin, NULL, _IONBF, 0);
+
+    __kfifo_init(&con_default.recv, con_default.recv_buf, CONSOLE_FIFO_SIZE, 1);
+    loop_register(&loop_default, &loop_console_cb);
     return 1;
 }
 
-static uint8_t kbhit(void)
+static uint8_t console_readable(void)
 {
-    int ch;
-
-    ch = getchar();
-
-    if(ch != EOF) {
-        ungetc(ch, stdin);
-        return 1;
-    }
-
-    return 0;
+    return (con_default.recv.in != con_default.recv.out);
 }
 
-static uint8_t getch(void)
+static uint8_t console_read(void)
 {
-    struct termios tm, tm_old;
-
-    if (tcgetattr(STDIN_FILENO, &tm) < 0) {
-        ERROR_PRINTF("get attr err\n");
-        return -1;
-    }
-
-    tm_old = tm;
-    cfmakeraw(&tm);
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &tm) < 0) {
-        ERROR_PRINTF("set attr err\n");
-        return -1;
-    }
-
-    uint8_t ch = getchar();
-    if (tcsetattr(STDIN_FILENO, TCSANOW, &tm_old) < 0) {
-        ERROR_PRINTF("set attr err\n");
-        return -1;
-    }
-
+    uint8_t ch;
+    __kfifo_out(&con_default.recv, &ch, 1);
     return ch;
 }
 
@@ -117,7 +168,19 @@ static uint8_t enable_raw_mode(void)
 
 }
 
+static uint8_t console_readable(void)
+{
+    return kbhit();
+}
+
+static uint8_t console_read(void)
+{
+    return getch();
+}
+
+
 #endif /* USE_UNIX_TERMINAL_API */
+
 
 
 static uint8_t putch(uint8_t ch)
@@ -126,12 +189,11 @@ static uint8_t putch(uint8_t ch)
 }
 
 
-
 const static struct charwr_interface console_interface = {
     .init = enable_raw_mode,
     .exit = disable_raw_mode,
-    .readable = kbhit,
-    .read = getch,
+    .readable = console_readable,
+    .read = console_read,
     .writeable = uart_8250_rw_enable,
     .write = putch,
 };
@@ -140,4 +202,9 @@ int console_register(struct uart_register *uart)
 {
     uart_8250_register(uart, &console_interface);
     return 0;
+}
+
+void console_term_register(int (*term)(uint8_t escape_char, uint8_t ch))
+{
+    con_default.term = term;
 }

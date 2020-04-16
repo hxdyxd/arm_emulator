@@ -17,7 +17,8 @@ peripheral.o\
 kfifo.o\
 slip_tun.o\
 slip_user.o\
-console.o
+console.o\
+loop.o
 
 C_INCLUDES =  \
 -I .\
