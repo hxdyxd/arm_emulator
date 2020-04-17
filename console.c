@@ -39,29 +39,31 @@
 #include <kfifo.h>
 
 
-#define CONSOLE_FIFO_SIZE   (16)
+#define CONSOLE_FIFO_SIZE   (512)
 
-static struct termios conio_orig_termios;
+static struct termios stdin_orig_termios;
 static int conio_oldf;
 static uint8_t term_escape_char = 'b' & 0x9f; /* ctrl-b is used for escape */
 
 struct console_status_t {
-    int idx;
+    int idx_r;
     struct __kfifo recv;
     uint8_t recv_buf[CONSOLE_FIFO_SIZE];
+    struct __kfifo send;
+    uint8_t send_buf[CONSOLE_FIFO_SIZE];
     uint8_t term_got_escape;
     int (*term)(uint8_t escape_char, uint8_t ch);
 };
 
 
 static struct console_status_t con_default = {
-    .idx = 0,
+    .idx_r = 0,
     .term = NULL,
 };
 
 static void disable_raw_mode(void)
 {
-    tcsetattr(STDIN_FILENO, TCSANOW, &conio_orig_termios);
+    tcsetattr(STDIN_FILENO, TCSANOW, &stdin_orig_termios);
     fcntl(STDIN_FILENO, F_SETFL, conio_oldf);
 }
 
@@ -86,13 +88,21 @@ send_char:
 static void console_prepare_callback(void *opaque)
 {
     struct console_status_t *c = (struct console_status_t *)opaque;
-    c->idx = loop_add_poll(&loop_default, STDIN_FILENO, POLLIN);
+    c->idx_r = loop_add_poll(&loop_default, STDIN_FILENO, POLLIN);
+
+    if(c->send.in != c->send.out) {
+        int ch;
+        while(__kfifo_out(&c->send, &ch, 1) == 1) {
+            putchar(ch);
+        }
+        fflush(stdout);
+    }
 }
 
 static void console_poll_callback(void *opaque)
 {
     struct console_status_t *c = (struct console_status_t *)opaque;
-    int revents = loop_get_revents(&loop_default, c->idx);
+    int revents = loop_get_revents(&loop_default, c->idx_r);
     if(revents & POLLIN) {
         int ch;
         if(read(STDIN_FILENO, &ch, 1) == 1) {
@@ -113,10 +123,11 @@ static const struct loopcb_t loop_console_cb = {
     .opaque = &con_default,
 };
 
+
 static uint8_t enable_raw_mode(void)
 {
-    tcgetattr(STDIN_FILENO, &conio_orig_termios);
-    struct termios term = conio_orig_termios;
+    tcgetattr(STDIN_FILENO, &stdin_orig_termios);
+    struct termios term = stdin_orig_termios;
     term.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP
                          | INLCR | IGNCR | ICRNL | IXON);
     term.c_oflag |= OPOST;
@@ -128,15 +139,14 @@ static uint8_t enable_raw_mode(void)
     term.c_lflag &= ~ISIG;
     if(tcsetattr(STDIN_FILENO, TCSANOW, &term) < 0) {
         ERROR_PRINTF("set attr err\n");
-        return 0;
+        return -1;
     }
 
     conio_oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
     fcntl(STDIN_FILENO, F_SETFL, conio_oldf | O_NONBLOCK);
-    setvbuf(stdout, NULL, _IONBF, 0);
-    setvbuf(stdin, NULL, _IONBF, 0);
 
     __kfifo_init(&con_default.recv, con_default.recv_buf, CONSOLE_FIFO_SIZE, 1);
+    __kfifo_init(&con_default.send, con_default.send_buf, CONSOLE_FIFO_SIZE, 1);
     loop_register(&loop_default, &loop_console_cb);
     return 1;
 }
@@ -153,6 +163,20 @@ static uint8_t console_read(void)
     return ch;
 }
 
+static uint8_t console_writeable(void)
+{
+    if(kfifo_unused(&con_default.send))
+        return 1;
+    else
+        return 0;
+}
+
+static uint8_t console_write(uint8_t ch)
+{
+    __kfifo_in(&con_default.send, &ch, 1);
+    return 0;
+}
+
 
 #else /* !USE_UNIX_TERMINAL_API */
 
@@ -165,7 +189,7 @@ static void disable_raw_mode(void)
 
 static uint8_t enable_raw_mode(void)
 {
-
+    return 1;
 }
 
 static uint8_t console_readable(void)
@@ -178,15 +202,19 @@ static uint8_t console_read(void)
     return getch();
 }
 
+static uint8_t console_writeable(void)
+{
+    return 1;
+}
+
+static uint8_t console_write(uint8_t ch)
+{
+    return putchar(ch);
+}
 
 #endif /* USE_UNIX_TERMINAL_API */
 
 
-
-static uint8_t putch(uint8_t ch)
-{
-    return putchar(ch);
-}
 
 
 const static struct charwr_interface console_interface = {
@@ -194,8 +222,8 @@ const static struct charwr_interface console_interface = {
     .exit = disable_raw_mode,
     .readable = console_readable,
     .read = console_read,
-    .writeable = uart_8250_rw_enable,
-    .write = putch,
+    .writeable = console_writeable,
+    .write = console_write,
 };
 
 int console_register(struct uart_register *uart)

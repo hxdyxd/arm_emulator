@@ -33,6 +33,7 @@
 #define PRINTF(...)           printf(LOG_NAME ": " __VA_ARGS__)
 #define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
 #define ERROR_PRINTF(...)     printf("\033[1;31m" LOG_NAME "\033[0m: " __VA_ARGS__)
+#define FLUSH_PRINTF(...)     do{ printf(__VA_ARGS__);fflush(stdout);}while(0)
 
 
 
@@ -480,7 +481,7 @@ int main(int argc, char **argv)
             char cmd_str[64] = {0, };
             uint8_t cmd_len = 0;
 
-            printf("\n[%u] cmd>", cpu->code_counter);
+            FLUSH_PRINTF("\n[%u] cmd>", cpu->code_counter);
             //console read
             for(cmd_len=0; cmd_len<64;) {
                 while(!peripheral_reg_base.uart[0].interface->readable()) {
@@ -491,17 +492,17 @@ int main(int argc, char **argv)
                     cmd_str[cmd_len] = 0;
                     if(cmd_len != 0)
                         break;
-                    printf("\n[%u] cmd>", cpu->code_counter);
+                    FLUSH_PRINTF("\n[%u] cmd>", cpu->code_counter);
                 } else if(cmd_str[cmd_len] == 0x7f) {
                     //delete
                     if(cmd_len != 0)
                         cmd_len--;
                     cmd_str[cmd_len] = '\0'; //clear
-                    printf("\n[%u] cmd>%s", cpu->code_counter, cmd_str);
+                    FLUSH_PRINTF("\n[%u] cmd>%s", cpu->code_counter, cmd_str);
                 } else if(cmd_str[cmd_len] == '\033') {
                     
                 } else {
-                    putchar(cmd_str[cmd_len]);
+                    FLUSH_PRINTF("%c", cmd_str[cmd_len]);
                     cmd_len++;
                 }
             }
