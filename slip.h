@@ -1,5 +1,5 @@
 /*
- * config.h of arm_emulator
+ * slip.h of arm_emulator
  * Copyright (C) 2019-2020  hxdyxd <hxdyxd@gmail.com>
  *
  * This program is free software; you can redistribute it and/or modify
@@ -16,20 +16,14 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
-#ifndef _CONFIG_H_
-#define _CONFIG_H_
+#ifndef _SLIP_H_
+#define _SLIP_H_
 
-#ifdef __linux__
-#define USE_PRCTL_SET_THREAD_NAME
-#define USE_TUN_SUPPORT
+#include <kfifo.h>
+#include <stdint.h>
+
+void slip_send_packet(struct __kfifo *fifo, uint8_t *buf, int len, uint8_t *is_run);
+int slip_recv_poll(struct __kfifo *fifo, uint8_t *buf, int len);
+
 #endif
-
-#define USE_SLIRP_SUPPORT
-#define FS_MMAP_MODE
-
-#ifndef _WIN32
-#define USE_UNIX_TERMINAL_API
-#endif
-
-#endif /*_CONFIG_H_*/
 /*****************************END OF FILE***************************/

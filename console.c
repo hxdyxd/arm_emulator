@@ -139,7 +139,7 @@ static uint8_t enable_raw_mode(void)
     term.c_lflag &= ~ISIG;
     if(tcsetattr(STDIN_FILENO, TCSANOW, &term) < 0) {
         ERROR_PRINTF("set attr err\n");
-        return -1;
+        return 0;
     }
 
     conio_oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
@@ -236,3 +236,4 @@ void console_term_register(int (*term)(uint8_t escape_char, uint8_t ch))
 {
     con_default.term = term;
 }
+/*****************************END OF FILE***************************/

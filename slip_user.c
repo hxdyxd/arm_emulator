@@ -29,9 +29,7 @@
 
 
 #ifdef USE_SLIRP_SUPPORT
-#include <sys/time.h>
-#include <sys/select.h>
-#include <kfifo.h>
+#include <slip.h>
 #include <libslirp.h>
 #include <loop.h>
 
@@ -156,8 +154,6 @@ struct slirp_arphdr {
 const static uint8_t guesthdr[ETH_ALEN] = {0x90, 0xad, 0xf7, 0xb9, 0x30, 0x1b};
 static uint8_t vhosthdr[ETH_ALEN] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
-static void slip_send_packet(uint8_t *p, int len, uint8_t *is_run);
-static int slip_recv_poll(struct slip_user_t *u, uint8_t *buf, int len);
 
 static void slirp_ip_send(struct slip_user_t *u, int ip_pkt_len)
 {
@@ -218,7 +214,7 @@ static int slirp_ip_input(struct slip_user_t *u, const void *buf, size_t len)
     uint8_t *ip_pkt = (uint8_t *)buf + ETH_HLEN;
     int ip_pkt_len = len - ETH_HLEN;
 
-    slip_send_packet(ip_pkt, ip_pkt_len, &LOOP_IS_RUN(&loop_default));
+    slip_send_packet(&u->send, ip_pkt, ip_pkt_len, &LOOP_IS_RUN(&loop_default));
     return len;
 }
 
@@ -348,7 +344,7 @@ static void prepare_callback(void *opaque)
     uint32_t timeout = 0;
     slirp_pollfds_fill(u->slirp, &timeout, add_poll, u);
     
-    int rlen = slip_recv_poll(u, u->slip_out_buf + ETH_HLEN, BUF_SIZE - ETH_HLEN);
+    int rlen = slip_recv_poll(&u->recv, u->slip_out_buf + ETH_HLEN, BUF_SIZE - ETH_HLEN);
     if(rlen) {
         slirp_ip_send(u, rlen);
         loop_set_timeout(&loop_default, 0);
@@ -425,124 +421,6 @@ static void net_slirp_exit(struct slip_user_t *u)
     }
 }
 
-/* Blockable */
-static inline void send_char(int ch, uint8_t *is_run)
-{
-    while(__kfifo_in(&slip_user.send, &ch, 1) == 0 && *is_run) {
-        struct timeval timeout = {
-            .tv_sec = 0,
-            .tv_usec = 20,
-        };
-        select(0, NULL, NULL, NULL, &timeout);
-    }
-}
-
-
-/* Blockable */
-static inline void send_char_do(uint8_t *is_run)
-{
-
-}
-
-
-#define FIFO_OUT_CHAR_PEEK(f,c,l)  __kfifo_out_peek_one(f,c,l)
-
-
-
-/* SLIP special character codes */
-#define END             0300    /* indicates end of packet */
-#define ESC             0333    /* indicates byte stuffing */
-#define ESC_END         0334    /* ESC ESC_END means END data byte */
-#define ESC_ESC         0335    /* ESC ESC_ESC means ESC data byte */
-
-
-/* SEND_PACKET: sends a packet of length "len", starting at
- * location "p".
- */
-static void slip_send_packet(uint8_t *p, int len, uint8_t *is_run)
-{
-    /* send an initial END character to flush out any data that may
-     * have accumulated in the receiver due to line noise
-     */
-    send_char(END, is_run);
-
-    /* for each byte in the packet, send the appropriate character
-     * sequence
-    */
-    while(len--) {
-        switch(*p) {
-        /* if it's the same code as an END character, we send a
-         * special two character code so as not to make the
-         * receiver think we sent an END */
-        case END:
-            send_char(ESC, is_run);
-            send_char(ESC_END, is_run);
-            break;
-
-        /* if it's the same code as an ESC character,
-        * we send a special two character code so as not
-        * to make the receiver think we sent an ESC
-        */
-        case ESC:
-            send_char(ESC, is_run);
-            send_char(ESC_ESC, is_run);
-            break;
-
-        /* otherwise, we just send the character
-        */
-        default:
-            send_char(*p, is_run);
-        }
-
-        p++;
-    }
-
-    /* tell the receiver that we're done sending the packet */
-    send_char(END, is_run);
-    send_char_do(is_run);
-}
-
-static int slip_recv_poll(struct slip_user_t *u, uint8_t *buf, int len)
-{
-    uint8_t ch;
-    int fifo_out = 0;
-    int received = 0;
-    while(FIFO_OUT_CHAR_PEEK(&u->recv, &ch, fifo_out+1) == fifo_out+1) {
-        fifo_out++;
-        switch(ch) {
-        case END:
-            if(received) {
-                u->recv.out += fifo_out;
-                return received;
-            } else {
-                break;
-            }
-        case ESC:
-            if(FIFO_OUT_CHAR_PEEK(&u->recv, &ch, fifo_out+1) == fifo_out+1) {
-                fifo_out++;
-                switch(ch) {
-                case ESC_END:
-                    ch = END;
-                    break;
-                case ESC_ESC:
-                    ch = ESC;
-                    break;
-                }
-            } else {
-                return 0;
-            }
-        default:
-            if(received < len) {
-                buf[received++] = ch;
-            } else {
-                //long packet
-                u->recv.out += fifo_out;
-                return received;
-            }
-        }
-    }
-    return 0;
-}
 
 #else /* !USE_SLIRP_SUPPORT */
 

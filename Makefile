@@ -18,7 +18,8 @@ kfifo.o\
 slip_tun.o\
 slip_user.o\
 console.o\
-loop.o
+loop.o\
+slip.o
 
 C_INCLUDES =  \
 -I .\
