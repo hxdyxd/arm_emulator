@@ -147,7 +147,6 @@ static int term_process(uint8_t escape_char, uint8_t ch)
     case 't':
     case 'q':
         step_by_step = 1;
-        PRINTF("[%s] step by step mode\n", step_by_step ? "x" : " ");
         return 1;
     default:
         ERROR_PRINTF("undefined escape option '%c', 0x%x\n", ch, ch);

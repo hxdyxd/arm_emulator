@@ -166,7 +166,7 @@ void tlb_show(struct mmu_t *mmu)
         WARN("TLB_I: [%d] va:%08x pa:%08x type:%d\n",
          i, tlb[i].vaddr, tlb[i].paddr, tlb[i].type);
     }
-    WARN("TLB: %d/%d = %.3f\n", mmu->tlb_hit, mmu->tlb_total,
+    WARN("TLB: %u/%u = %.3f\n", mmu->tlb_hit, mmu->tlb_total,
      mmu->tlb_hit*1.0/mmu->tlb_total);
 }
 
@@ -816,19 +816,19 @@ static inline uint32_t adder_with_carry(const uint32_t op1, const uint32_t op2,
     uint32_t sum_middle = 0, cy_high_bits = 0;
     uint32_t aluout = 0;
     if(add_mode == ALU_MODE_ADD) {
-        sum_middle = (op1&0x7fffffff) + (op2&0x7fffffff) + carry;
+        sum_middle = (op1 & 0x7fffffff) + (op2 & 0x7fffffff) + carry;
         cy_high_bits =  IS_SET(op1, 31) + IS_SET(op2, 31) + IS_SET(sum_middle, 31);
 
-        aluout = (cy_high_bits << 31) | (sum_middle&0x7fffffff);
+        aluout = (cy_high_bits << 31) | (sum_middle & 0x7fffffff);
         *bit_cy = (cy_high_bits >> 1)&1;
-        *bit_ov = (*bit_cy ^ IS_SET(sum_middle, 31))&1;
+        *bit_ov = (*bit_cy ^ IS_SET(sum_middle, 31)) & 1;
     } else if(add_mode == ALU_MODE_SUB) {
-        sum_middle = (op1&0x7fffffff) - (op2&0x7fffffff) - carry;
+        sum_middle = (op1 & 0x7fffffff) - (op2 & 0x7fffffff) - carry;
         cy_high_bits =  IS_SET(op1, 31) - IS_SET(op2, 31) - IS_SET(sum_middle, 31);
 
-        aluout = (cy_high_bits << 31) | (sum_middle&0x7fffffff);
-        *bit_cy = (cy_high_bits >> 1)&1;
-        *bit_ov = (*bit_cy ^ IS_SET(sum_middle, 31))&1;
+        aluout = (cy_high_bits << 31) | (sum_middle & 0x7fffffff);
+        *bit_cy = (cy_high_bits >> 1) & 1;
+        *bit_ov = (*bit_cy ^ IS_SET(sum_middle, 31)) & 1;
         *bit_cy = !(*bit_cy);
     }
     
@@ -836,7 +836,6 @@ static inline uint32_t adder_with_carry(const uint32_t op1, const uint32_t op2,
      op1, op2, carry, aluout);
     return aluout;
 }
-
 
 
 //**************************************************
