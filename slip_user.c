@@ -41,12 +41,6 @@
 /* value is a power of two */
 #define FIFO_SIZE     (4096)
 
-/* host forward addr */
-#define FWD_HOST_ADDR     (0)
-#define FWD_HOST_PORT     (8080)
-#define FWD_GUEST_ADDR    IP_PACK(10, 0, 0, 2)
-#define FWD_GUEST_PORT    (80)
-
 
 struct slip_user_t {
     struct __kfifo send;
@@ -386,9 +380,8 @@ static int net_slirp_init(struct slip_user_t *u)
         .vnetmask = { .s_addr = IP_PACK(255, 255, 255, 0) },
         .vhost = { .s_addr = IP_PACK(10, 0, 0, 1) },
         .vhostname = "slirp_vhost",
+        .vdhcp_start = { .s_addr = IP_PACK(10, 0, 0, 2) },
     };
-    struct in_addr fwd_host_addr = { .s_addr = FWD_HOST_ADDR };
-    struct in_addr fwd_guest_addr = { .s_addr = FWD_GUEST_ADDR };
 
     DEBUG_PRINTF("version %s\n", slirp_version_string());
 
@@ -398,13 +391,6 @@ static int net_slirp_init(struct slip_user_t *u)
     u->slirp = slirp_new(&cfg, &slirp_cb, u);
     if(!u->slirp)
         goto err;
-
-    DEBUG_PRINTF("hostfwd host addr %s:%d\n", inet_ntoa(fwd_host_addr), FWD_HOST_PORT);
-    DEBUG_PRINTF("hostfwd guest addr %s:%d\n", inet_ntoa(fwd_guest_addr), FWD_GUEST_PORT);
-    int r = slirp_add_hostfwd(u->slirp, 0, fwd_host_addr, FWD_HOST_PORT, fwd_guest_addr, FWD_GUEST_PORT);
-    if(r < 0) {
-        ERROR_PRINTF("add hostfwd err\n");
-    }
 
     loop_register(&loop_default, &loop_slip_user_cb);
     return 0;
@@ -469,6 +455,104 @@ int slip_user_register(struct uart_register *uart)
 {
     uart_8250_register(uart, &slip_user_interface);
     return 0;
+}
+
+
+static int get_str_sep(char *buf, int buf_size, const char **pp, int sep)
+{
+    const char *p, *p1;
+    int len;
+    p = *pp;
+    p1 = strchr(p, sep);
+    if (!p1)
+        return -1;
+    len = p1 - p;
+    p1++;
+    if (buf_size > 0) {
+        if (len > buf_size - 1)
+            len = buf_size - 1;
+        memcpy(buf, p, len);
+        buf[len] = '\0';
+    }
+    *pp = p1;
+    return 0;
+}
+
+int slip_user_hostfwd(const char *redir_str)
+{
+    struct in_addr host_addr = { .s_addr = INADDR_ANY };
+    struct in_addr guest_addr = { .s_addr = 0 };
+    int host_port, guest_port;
+    const char *p;
+    char buf[256];
+    int is_udp;
+    char *end;
+    const char *fail_reason = "Unknown reason";
+
+    p = redir_str;
+    if (!p || get_str_sep(buf, sizeof(buf), &p, ':') < 0) {
+        fail_reason = "No : separators";
+        goto fail_syntax;
+    }
+    if (!strcmp(buf, "tcp") || buf[0] == '\0') {
+        is_udp = 0;
+    } else if (!strcmp(buf, "udp")) {
+        is_udp = 1;
+    } else {
+        fail_reason = "Bad protocol name";
+        goto fail_syntax;
+    }
+
+    if (get_str_sep(buf, sizeof(buf), &p, ':') < 0) {
+        fail_reason = "Missing : separator";
+        goto fail_syntax;
+    }
+    if (buf[0] != '\0' && !inet_aton(buf, &host_addr)) {
+        fail_reason = "Bad host address";
+        goto fail_syntax;
+    }
+
+    if (get_str_sep(buf, sizeof(buf), &p, '-') < 0) {
+        fail_reason = "Bad host port separator";
+        goto fail_syntax;
+    }
+    host_port = strtol(buf, &end, 0);
+    if (*end != '\0' || host_port < 0 || host_port > 65535) {
+        fail_reason = "Bad host port";
+        goto fail_syntax;
+    }
+
+    if (get_str_sep(buf, sizeof(buf), &p, ':') < 0) {
+        fail_reason = "Missing guest address";
+        goto fail_syntax;
+    }
+    if (buf[0] != '\0' && !inet_aton(buf, &guest_addr)) {
+        fail_reason = "Bad guest address";
+        goto fail_syntax;
+    }
+
+    guest_port = strtol(p, &end, 0);
+    if(*end == ',') {
+        if(slip_user_hostfwd(end + 1) < 0)
+            return -1;
+    } else if (/**end != '\0' || */guest_port < 1 || guest_port > 65535) {
+        fail_reason = "Bad guest port";
+        goto fail_syntax;
+    }
+    
+    DEBUG_PRINTF("hostfwd host addr %s:%d\n", inet_ntoa(host_addr), host_port);
+    DEBUG_PRINTF("hostfwd guest addr %s:%d\n", inet_ntoa(guest_addr), guest_port);
+    if (slirp_add_hostfwd(slip_user.slirp, is_udp, host_addr, host_port, guest_addr,
+                          guest_port) < 0) {
+        ERROR_PRINTF("Could not set up host forwarding rule '%s'\n", redir_str);
+        return -1;
+    }
+    return 0;
+
+ fail_syntax:
+    ERROR_PRINTF("Invalid host forwarding rule '%s' (%s)\n", redir_str,
+               fail_reason);
+    return -1;
 }
 
 

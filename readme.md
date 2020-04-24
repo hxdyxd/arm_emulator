@@ -38,6 +38,10 @@ Run linux kernel
 > armemulator -m linux -f zImage -r rootfs.ext2  
 > armemulator -m linux -f Image -t arm-emulator.dtb -r rootfs.ext2  
 
+Forward a host port to guest port
+> armemulator -m linux -f zImage -r rootfs.ext2 -n user,tcp::2222-:22  
+> armemulator -m linux -f zImage -r rootfs.ext2 -n user,[tcp|udp]:[host_addr]:[host_port]-[guest_addr]:[guest_port],[...]  
+
 ## Usage
 
 ```

@@ -362,6 +362,7 @@ int main(int argc, char **argv)
     uint8_t net_mode = USE_NET_USER;
     char *image_path = NULL;
     char *dtb_path = NULL;
+    char *hostfwd_cmd = NULL;
     int ch;
 
     peripheral_reg_base.fs.filename = NULL;
@@ -392,6 +393,15 @@ int main(int argc, char **argv)
         case 'n':
             if(optarg[0] == 'u' || strcmp(optarg, "user") == 0) {
                 net_mode = USE_NET_USER;
+                int r = 0;
+                while(optarg[r] != '\0') {
+                    if(optarg[r] == ',') {
+                        r++;
+                        hostfwd_cmd = &optarg[r];
+                        break;
+                    }
+                    r++;
+                }
             } else if(optarg[0] == 't' || strcmp(optarg, "tun") == 0) {
                 net_mode = USE_NET_TUN;
             } else {
@@ -445,6 +455,9 @@ int main(int argc, char **argv)
     peripheral_register(cpu, peripheral_config, SIZEOF_PERIPHERAL_CONFIG(peripheral_config));
     atexit(peripheral_exit);
     console_term_register(term_process);
+    if(net_mode == USE_NET_USER && hostfwd_cmd && slip_user_hostfwd(hostfwd_cmd) < 0) {
+        exit(-1);
+    }
     if(loop_start(&loop_default) < 0)
         exit(-1);
 
