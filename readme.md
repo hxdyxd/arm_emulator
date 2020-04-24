@@ -16,6 +16,10 @@ Simple armv4 emulator with embedded freertos and linux operating system support
 * Step by step running  
 * Disassembler  
 
+## Dependency
+
+![dependency](/doc/pic/dependency.png)
+
 ## Other codes
 * [arm-emulator-linux](https://github.com/hxdyxd/arm-emulator-linux), [arm-emulator-linux(gitee mirror)](https://gitee.com/hxdyxd/arm-emulator-linux)  
 * [buildroot(generate embedded Linux systems)](https://github.com/hxdyxd/buildroot)  
