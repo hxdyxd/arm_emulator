@@ -23,7 +23,11 @@
 
 #include <time.h>
 #include <errno.h>
+#include <config.h>
 
+#ifdef USE_PRCTL_SET_THREAD_NAME
+#include <sys/prctl.h>
+#endif
 
 #define LOG_NAME   "loop"
 #define DEBUG_PRINTF(...)     printf("\033[0;32m" LOG_NAME "\033[0m: " __VA_ARGS__)
