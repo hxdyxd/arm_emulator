@@ -168,7 +168,7 @@ void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 uint32_t intc_reset(void *base);
 uint32_t intc_read(void *base, uint32_t address);
 void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
-uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter);
+uint32_t user_event(struct peripheral_t *base);
 
 void tim_exit(int s, void *base);
 uint32_t tim_reset(void *base);

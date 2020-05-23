@@ -256,7 +256,7 @@ static uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id)
  * user_event: interrupt request
  * author:hxdyxd
  */
-uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter)
+uint32_t user_event(struct peripheral_t *base)
 {
     uint32_t event = 0;
     struct interrupt_register *intc = &base->intc;
@@ -278,8 +278,7 @@ uint32_t user_event(struct peripheral_t *base, const uint32_t code_counter)
                         uart->IIR = UART_IIR_THRI; // THR empty interrupt pending
                     }
                     return event;
-                } else  if( (uart->IER & UART_IER_RDI) && 
-                     (code_counter & 0x7fff) == 0x4000 && uart->interface->readable() ) {
+                } else  if( (uart->IER & UART_IER_RDI) && uart->interface->readable() ) {
                     //Bit0, Enable Received Data Available Interrupt. 
                     if((event = interrupt_happen(intc, uart->interrupt_id)) != 0 ) {
                         uart->IIR = UART_IIR_RDI; //received data available interrupt pending

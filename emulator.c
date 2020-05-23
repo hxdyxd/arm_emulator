@@ -609,7 +609,7 @@ RUN:
             interrupt_exception(cpu, INT_EXCEPTION_PREABT);
             break;
         default:
-            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, cpu->code_counter)) {
+            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base)) {
                 interrupt_exception(cpu, INT_EXCEPTION_IRQ);
             }
         }
