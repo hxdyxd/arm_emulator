@@ -36,7 +36,8 @@
 #include <sys/ioctl.h>
 #include <errno.h>
 #include <linux/if_tun.h>
-
+#include <sys/types.h>
+#include <sys/socket.h>
 //struct ifreq ifr;
 #include <linux/if.h>
 
