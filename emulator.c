@@ -336,6 +336,7 @@ void print_addr(struct armv4_cpu_t *cpu, char *ps)
 }
 
 
+#define GET_TICK()   (uint32_t)(clock() / (CLOCKS_PER_SEC/1000))
 #define CLOCK_UPDATE_RATE    (0x1ffffff)
 static void clock_speed_detect(struct armv4_cpu_t *cpu, const uint8_t rt_debug)
 {
@@ -608,8 +609,13 @@ RUN:
         case EVENT_ID_PREAABT:
             interrupt_exception(cpu, INT_EXCEPTION_PREABT);
             break;
+        case EVENT_ID_WFI:
+            while(!user_event(&peripheral_reg_base, EVENT_TYPE_DETECT)) {
+                usleep(10);
+            }
+            //miss break
         default:
-            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base)) {
+            if(!cpsr_i(cpu) && user_event(&peripheral_reg_base, EVENT_TYPE_HAPPEN)) {
                 interrupt_exception(cpu, INT_EXCEPTION_IRQ);
             }
         }

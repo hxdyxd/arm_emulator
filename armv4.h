@@ -99,6 +99,7 @@ struct armv4_cpu_t {
 #define EVENT_ID_SWI       (2)
 #define EVENT_ID_DATAABT   (3)
 #define EVENT_ID_PREAABT   (4)
+#define EVENT_ID_WFI       (5)
     }decoder;
 
     struct mmu_t {

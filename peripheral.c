@@ -251,19 +251,36 @@ static uint32_t interrupt_happen(struct interrupt_register *intc, uint32_t id)
     return 1;
 }
 
+static uint32_t interrupt_detect(struct interrupt_register *intc, uint32_t id)
+{
+    return 1;
+}
 
 /*
  * user_event: interrupt request
  * author:hxdyxd
  */
-uint32_t user_event(struct peripheral_t *base)
+uint32_t user_event(struct peripheral_t *base, uint8_t type)
 {
     uint32_t event = 0;
     struct interrupt_register *intc = &base->intc;
     struct timer_register *tim = &base->tim;
+    uint32_t (*interrupt_action)(struct interrupt_register *intc, uint32_t id) = NULL;
+    switch(type) {
+    case EVENT_TYPE_DETECT:
+        interrupt_action = interrupt_detect;
+        break;
+    case EVENT_TYPE_HAPPEN:
+        interrupt_action = interrupt_happen;
+        break;
+    default:
+        return 0;
+    }
     if(tim->EN &&  tim->CNT - tim->privious_cnt >= 10 ) {
-        tim->privious_cnt = tim->CNT;
-        event = interrupt_happen(intc, tim->interrupt_id);
+        if(type != EVENT_TYPE_DETECT) {
+            tim->privious_cnt = tim->CNT;
+        }
+        event = interrupt_action(intc, tim->interrupt_id);
         return event;
     } else {
         for(int i=0; i<UART_NUMBER; i++) {
@@ -274,13 +291,13 @@ uint32_t user_event(struct peripheral_t *base)
                 //UART
                 if( (uart->IER & UART_IER_THRI) && uart->interface->writeable() ) {
                     //Bit1, Enable Transmit Holding Register Empty Interrupt. 
-                    if((event = interrupt_happen(intc, uart->interrupt_id)) != 0) {
+                    if((event = interrupt_action(intc, uart->interrupt_id)) != 0) {
                         uart->IIR = UART_IIR_THRI; // THR empty interrupt pending
                     }
                     return event;
                 } else  if( (uart->IER & UART_IER_RDI) && uart->interface->readable() ) {
                     //Bit0, Enable Received Data Available Interrupt. 
-                    if((event = interrupt_happen(intc, uart->interrupt_id)) != 0 ) {
+                    if((event = interrupt_action(intc, uart->interrupt_id)) != 0 ) {
                         uart->IIR = UART_IIR_RDI; //received data available interrupt pending
                     }
                     return event;

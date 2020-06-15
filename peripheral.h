@@ -27,9 +27,6 @@
 #include <pthread.h>
 #include <config.h>
 
-#define  GET_TICK()   (uint32_t)(clock() / (CLOCKS_PER_SEC/1000))
-
-
 
 #ifndef MEM_SIZE
 #define MEM_SIZE   (1 << 25)  //32M
@@ -168,7 +165,9 @@ void fs_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
 uint32_t intc_reset(void *base);
 uint32_t intc_read(void *base, uint32_t address);
 void intc_write(void *base, uint32_t address, uint32_t data, uint8_t mask);
-uint32_t user_event(struct peripheral_t *base);
+#define EVENT_TYPE_DETECT   (0)
+#define EVENT_TYPE_HAPPEN   (1)
+uint32_t user_event(struct peripheral_t *base, uint8_t type);
 
 void tim_exit(int s, void *base);
 uint32_t tim_reset(void *base);

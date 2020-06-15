@@ -113,7 +113,7 @@ static inline uint32_t cp15_read(struct mmu_t *mmu, uint8_t CRn, uint8_t CRm,
 
 
 //mcr p15, 0, Rd, CRn, CRm, op2
-static inline void cp15_write(struct mmu_t *mmu, uint32_t Rd_val, uint8_t CRn,
+static inline uint32_t cp15_write(struct mmu_t *mmu, uint32_t Rd_val, uint8_t CRn,
  uint8_t CRm, uint32_t op2)
 {
     switch(CRn) {
@@ -128,6 +128,10 @@ static inline void cp15_write(struct mmu_t *mmu, uint32_t Rd_val, uint8_t CRn,
         break;
     case 7:
         //Cache functions
+        if(CRm == 0 && op2 == 4) {
+            //Wait for interrupt
+            return 1;
+        }
         break;
     case 8:
         //TLB functions
@@ -138,6 +142,7 @@ static inline void cp15_write(struct mmu_t *mmu, uint32_t Rd_val, uint8_t CRn,
          Rd_val, CRn, CRm, op2);
         break;
     }
+    return 0;
 }
 
 
@@ -1304,8 +1309,10 @@ static void code_mcr(struct armv4_cpu_t *cpu, const union ins_t ins)
     } else {
         //mcr
         Rd_val = register_read(cpu, Rd);
-        cp15_write(&cpu->mmu, Rd_val, ins.mcr.CRn, ins.mcr.CRm, ins.mcr.opcode2);
-
+        uint32_t result = cp15_write(&cpu->mmu, Rd_val, ins.mcr.CRn, ins.mcr.CRm, ins.mcr.opcode2);
+        if(result) {
+            cpu->decoder.event_id = EVENT_ID_WFI;
+        }
         PRINTF("[MCR] write R%d[0x%x] to cp%d_c%d \r\n",
          Rd, Rd_val, ins.mcr.cp_num, ins.mcr.CRn);
     }
