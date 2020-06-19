@@ -1292,6 +1292,8 @@ static void code_mcr(struct armv4_cpu_t *cpu, const union ins_t ins)
     //  cp_register  Rn
     if(ins.mcr.cp_num != 15)
         return;
+    if(!is_privileged(cpu))
+        return;
     uint32_t Rd_val;
     if(Bit20) {
         //mrc
