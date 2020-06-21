@@ -7,6 +7,7 @@
 Simple armv4 emulator with embedded freertos and linux operating system support  
 
 ## Currently supported features
+
 * All ARMv4 instructions  
 * Interrupts (timer interrupt, 8250 serial interrupts)  
 * Prefetch Abort, Data Abort, Undefined instruction, IRQ ,FIQ exceptions  
@@ -15,6 +16,17 @@ Simple armv4 emulator with embedded freertos and linux operating system support
 * Console support via serial port  
 * Step by step running  
 * Disassembler  
+
+## Memory Mapping
+
+| Module          | Address                   | Size (byte) |
+| :-------------- | :------------------------ | :---------- |
+| RAM             | 0x0000 0000---0x01FF FFFF |   32M       |
+| INTC            | 0x4001 f040---0x4001 F047 |   8         |
+| Timer           | 0x4001 f020---0x4001 f027 |   8         |
+| UART0           | 0x4002 0000---0x4002 00FF |   256       |
+| UART1_SLIP      | 0x4002 0100---0x4002 01FF |   256       |
+| ROMFS           | 0x8000 0000---0x9FFF FFFF |   512M      |
 
 ## Dependency
 
