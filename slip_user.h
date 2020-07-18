@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <peripheral.h>
 
-int slip_user_register(struct uart_register *uart);
+int slip_user_register(const struct charwr_interface **interface);
 int slip_user_hostfwd(const char *redir_str);
 
 #endif

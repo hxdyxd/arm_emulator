@@ -411,13 +411,6 @@ uint8_t uart_8250_rw_disable(void)
 }
 
 
-void uart_8250_register(struct uart_register *uart,
- const struct charwr_interface *interface)
-{
-    uart->interface = interface;
-}
-
-
 uint32_t uart_8250_reset(void *base) 
 {
     struct uart_register *uart = base;
@@ -428,11 +421,13 @@ uint32_t uart_8250_reset(void *base)
         ERROR_PRINTF("uart_8250 interface_register_cb = null\n");
         return 0;
     }
-    if(uart->interface_register_cb(uart) < 0)
+    if(uart->interface_register_cb(&uart->interface) < 0)
         return 0;
-    if(!uart->interface->init)
+    if(!uart->interface->readable || !uart->interface->read)
         return 0;
-    if(!uart->interface->init())
+    if(!uart->interface->writeable || !uart->interface->write)
+        return 0;
+    if(!uart->interface->init || !uart->interface->init())
         return 0;
 
     DEBUG_PRINTF("uart_8250 interrupt id: %d\n", uart->interrupt_id);

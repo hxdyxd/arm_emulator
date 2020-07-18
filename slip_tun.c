@@ -253,9 +253,9 @@ const static struct charwr_interface tun_interface = {
     .write = slip_tun_write,
 };
 
-int slip_tun_register(struct uart_register *uart)
+int slip_tun_register(const struct charwr_interface **interface)
 {
-    uart_8250_register(uart, &tun_interface);
+    *interface = &tun_interface;
     return 0;
 }
 

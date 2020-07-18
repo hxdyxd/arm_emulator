@@ -410,8 +410,8 @@ static void net_slirp_exit(struct slip_user_t *u)
 
 #else /* !USE_SLIRP_SUPPORT */
 
-//tun stub
-static uint8_t slip_tun_init(void)
+//user stub
+static uint8_t slip_user_init(void)
 {
     ERROR_PRINTF("slirp is not supported in this build\n");
     return 1;
@@ -451,9 +451,9 @@ static const struct charwr_interface slip_user_interface = {
     .write = slip_user_write,
 };
 
-int slip_user_register(struct uart_register *uart)
+int slip_user_register(const struct charwr_interface **interface)
 {
-    uart_8250_register(uart, &slip_user_interface);
+    *interface = &slip_user_interface;
     return 0;
 }
 

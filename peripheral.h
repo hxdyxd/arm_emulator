@@ -85,7 +85,7 @@ struct peripheral_t {
 
     struct uart_register {
         //predefined start
-        int ( *interface_register_cb)(struct uart_register *uart);
+        int ( *interface_register_cb)(const struct charwr_interface **interface);
         uint32_t interrupt_id;
         //predefined end
         const struct charwr_interface *interface;

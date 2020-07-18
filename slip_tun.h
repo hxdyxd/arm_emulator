@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <peripheral.h>
 
-int slip_tun_register(struct uart_register *uart);
+int slip_tun_register(const struct charwr_interface **interface);
 
 
 #endif

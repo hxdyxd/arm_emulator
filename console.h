@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <peripheral.h>
 
-int console_register(struct uart_register *uart);
+int console_register(const struct charwr_interface **interface);
 void console_term_register(int (*term)(uint8_t escape_char, uint8_t ch));
 
 #endif

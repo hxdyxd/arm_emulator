@@ -226,9 +226,9 @@ const static struct charwr_interface console_interface = {
     .write = console_write,
 };
 
-int console_register(struct uart_register *uart)
+int console_register(const struct charwr_interface **interface)
 {
-    uart_8250_register(uart, &console_interface);
+    *interface = &console_interface;
     return 0;
 }
 
