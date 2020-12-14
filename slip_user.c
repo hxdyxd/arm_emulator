@@ -407,57 +407,6 @@ static void net_slirp_exit(struct slip_user_t *u)
     }
 }
 
-
-#else /* !USE_SLIRP_SUPPORT */
-
-//user stub
-static uint8_t slip_user_init(void)
-{
-    ERROR_PRINTF("slirp is not supported in this build\n");
-    return 1;
-}
-
-static void slip_user_exit(void)
-{
-}
-
-static uint8_t slip_user_readable(void) 
-{
-    return 0;
-}
-
-static uint8_t slip_user_read(void)
-{
-    return 0;
-}
-
-static uint8_t slip_user_writeable(void)
-{
-    return 1;
-}
-
-static uint8_t slip_user_write(uint8_t ch)
-{
-    return 0;
-}
-#endif /* USE_SLIRP_SUPPORT */
-
-static const struct charwr_interface slip_user_interface = {
-    .init = slip_user_init,
-    .exit = slip_user_exit,
-    .readable = slip_user_readable,
-    .read = slip_user_read,
-    .writeable = slip_user_writeable,
-    .write = slip_user_write,
-};
-
-int slip_user_register(const struct charwr_interface **interface)
-{
-    *interface = &slip_user_interface;
-    return 0;
-}
-
-
 static int get_str_sep(char *buf, int buf_size, const char **pp, int sep)
 {
     const char *p, *p1;
@@ -555,5 +504,54 @@ int slip_user_hostfwd(const char *redir_str)
     return -1;
 }
 
+
+#else /* !USE_SLIRP_SUPPORT */
+
+//user stub
+static uint8_t slip_user_init(void)
+{
+    ERROR_PRINTF("slirp is not supported in this build\n");
+    return 1;
+}
+
+static void slip_user_exit(void)
+{
+}
+
+static uint8_t slip_user_readable(void) 
+{
+    return 0;
+}
+
+static uint8_t slip_user_read(void)
+{
+    return 0;
+}
+
+static uint8_t slip_user_writeable(void)
+{
+    return 1;
+}
+
+static uint8_t slip_user_write(uint8_t ch)
+{
+    return 0;
+}
+#endif /* USE_SLIRP_SUPPORT */
+
+static const struct charwr_interface slip_user_interface = {
+    .init = slip_user_init,
+    .exit = slip_user_exit,
+    .readable = slip_user_readable,
+    .read = slip_user_read,
+    .writeable = slip_user_writeable,
+    .write = slip_user_write,
+};
+
+int slip_user_register(const struct charwr_interface **interface)
+{
+    *interface = &slip_user_interface;
+    return 0;
+}
 
 /**************************END OF FILE*****************************/

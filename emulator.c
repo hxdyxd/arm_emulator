@@ -456,9 +456,15 @@ int main(int argc, char **argv)
     peripheral_register(cpu, peripheral_config, SIZEOF_PERIPHERAL_CONFIG(peripheral_config));
     atexit(peripheral_exit);
     console_term_register(term_process);
+
+#ifdef USE_SLIRP_SUPPORT
     if(net_mode == USE_NET_USER && hostfwd_cmd && slip_user_hostfwd(hostfwd_cmd) < 0) {
         exit(-1);
     }
+#else
+    (void)hostfwd_cmd;
+#endif
+
     if(loop_start(&loop_default) < 0)
         exit(-1);
 
