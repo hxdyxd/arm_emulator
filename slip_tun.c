@@ -139,14 +139,9 @@ static int tun_alloc(int flags)
 static void slip_tun_prepare_callback(void *opaque)
 {
     struct slip_tun_t *t = (struct slip_tun_t *)opaque;
-    t->idx = loop_add_poll(&loop_default, t->fd, POLLIN);
-
-    int rlen = slip_recv_poll(&t->recv, t->buf, BUF_SIZE);
-    if(rlen) {
-        int wlen;
-        do {
-            wlen = write(t->fd, t->buf, rlen);
-        } while(wlen < 0 && wlen == EINTR);
+    int events = POLLIN;
+    if(t->recv.in != t->recv.out) {
+        events |= POLLOUT;
         loop_set_timeout(&loop_default, 0);
         t->recv_time_cnt = loop_get_clock_ms(&loop_default);
     } else {
@@ -156,6 +151,7 @@ static void slip_tun_prepare_callback(void *opaque)
             loop_set_timeout(&loop_default, 0);
         }
     }
+    t->idx = loop_add_poll(&loop_default, t->fd, events);
 }
 
 static void slip_tun_poll_callback(void *opaque)
@@ -170,6 +166,15 @@ static void slip_tun_poll_callback(void *opaque)
         }
         
         slip_send_packet(&t->send, t->buf, total_len, &LOOP_IS_RUN(&loop_default));
+    }
+    if(revents & POLLOUT) {
+        int rlen = slip_recv_poll(&t->recv, t->buf, BUF_SIZE);
+        if(rlen) {
+            int wlen;
+            do {
+                wlen = write(t->fd, t->buf, rlen);
+            } while(wlen < 0 && wlen == EINTR);
+        }
     }
 }
 

@@ -51,6 +51,7 @@ struct console_status_t {
     uint8_t recv_buf[CONSOLE_FIFO_SIZE];
     struct __kfifo send;
     uint8_t send_buf[CONSOLE_FIFO_SIZE];
+    uint32_t send_time_cnt;
     uint8_t term_got_escape;
     int (*term)(uint8_t escape_char, uint8_t ch);
 };
@@ -88,15 +89,19 @@ send_char:
 static void console_prepare_callback(void *opaque)
 {
     struct console_status_t *c = (struct console_status_t *)opaque;
-    c->idx_r = loop_add_poll(&loop_default, STDIN_FILENO, POLLIN);
-
+    int events = POLLIN;
     if(c->send.in != c->send.out) {
-        int ch;
-        while(__kfifo_out(&c->send, &ch, 1) == 1) {
-            putchar(ch);
+        events |= POLLOUT;
+        loop_set_timeout(&loop_default, 1);
+        c->send_time_cnt = loop_get_clock_ms(&loop_default);
+    } else {
+        if(loop_get_clock_ms(&loop_default) - c->send_time_cnt >= 2) {
+            loop_set_timeout(&loop_default, 1);
+        } else {
+            loop_set_timeout(&loop_default, 0);
         }
-        fflush(stdout);
     }
+    c->idx_r = loop_add_poll(&loop_default, STDIN_FILENO, events);
 }
 
 static void console_poll_callback(void *opaque)
@@ -112,6 +117,13 @@ static void console_poll_callback(void *opaque)
                 poll(NULL, 0, 1);
             }
         }
+    }
+    if(revents & POLLOUT) {
+        int ch;
+        while(__kfifo_out(&c->send, &ch, 1) == 1) {
+            write(STDOUT_FILENO, &ch, 1);
+        }
+        fflush(stdout);
     }
 }
 

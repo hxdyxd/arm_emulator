@@ -21,7 +21,11 @@
 
 #include <stdint.h>
 #include <poll.h>
+#ifdef NO_GLIB
+#include <garray.h>
+#else
 #include <glib.h>
+#endif
 #include <pthread.h>
 
 struct loopcb_t {

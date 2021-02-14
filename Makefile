@@ -22,18 +22,26 @@ loop.o\
 slip.o
 
 C_INCLUDES =  \
--I .\
--I libslirp/src
+-I .
 
 GIT_TAGS = $(shell git describe --tags)
 CFLAGS += -DARMEMULATOR_VERSION_STRING=\"$(GIT_TAGS)\"
 CFLAGS += -O3 -Wall -std=gnu99 -g $(C_DEFS)
-CFLAGS += $(shell $(PKG_CONFIG) --cflags glib-2.0)
 
-LDFLAGS += libslirp/libslirp.a
-LDFLAGS += $(shell $(PKG_CONFIG) --libs glib-2.0)
 LDFLAGS += -lpthread
 
+NO_GLIB = 0
+ifeq ($(NO_GLIB), 1)
+	CFLAGS += -DNO_GLIB
+	SLIP_USER_DEPS =
+else
+	C_INCLUDES += -I libslirp/src
+	CFLAGS += -DUSE_SLIRP_SUPPORT
+	CFLAGS += $(shell $(PKG_CONFIG) --cflags glib-2.0)
+	LDFLAGS += libslirp/libslirp.a
+	LDFLAGS += $(shell $(PKG_CONFIG) --libs glib-2.0)
+	SLIP_USER_DEPS = libslirp/libslirp.a
+endif
 
 
 quiet_CC  =      @echo "  CC      $@"; $(CC)
@@ -52,6 +60,8 @@ STATIC = 0
 ifeq ($(STATIC), 1)
 	LDFLAGS += -static
 endif
+CFLAGS += $(C_INCLUDES)
+
 
 all: $(TARGET)
 
@@ -59,15 +69,15 @@ $(TARGET): $(OBJS)
 	$($(quiet)LD) -o $(TARGET)   $(OBJS) $(LDFLAGS)
 
 %.o: %.c
-	$($(quiet)CC) $(CFLAGS) $(C_INCLUDES) -o $@ -c $<
+	$($(quiet)CC) $(CFLAGS) -o $@ -c $<
 
-slip_user.c: libslirp/libslirp.a
+slip_user.c: $(SLIP_USER_DEPS)
 
 .PHONY: clean
 clean: clean_slirp
 	$(RM) -f $(TARGET) $(OBJS)
 
-install:$(TARGET)
+install: $(TARGET)
 	$($(quiet)INSTALL) -D $< /usr/local/bin/$<
 
 uninstall:

@@ -646,7 +646,7 @@ void peripheral_register(struct armv4_cpu_t *cpu, struct peripheral_link_t *link
     for(int i=0; i<cpu->peripheral.number; i++) {
         if(cpu->peripheral.link[i].reset) {
             if(cpu->peripheral.link[i].reset(cpu->peripheral.link[i].reg_base)) {
-                WARN("[%d]%s register at 0x%08x, size %d\n",
+                WARN("[%d]%s register at 0x%08x, size 0x%x\n",
                     i, cpu->peripheral.link[i].name,
                      cpu->peripheral.link[i].prefix,
                       (~cpu->peripheral.link[i].mask)+1);

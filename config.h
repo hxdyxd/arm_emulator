@@ -24,7 +24,6 @@
 #define USE_TUN_SUPPORT
 #endif
 
-#define USE_SLIRP_SUPPORT
 #define FS_MMAP_MODE
 
 #ifndef _WIN32
