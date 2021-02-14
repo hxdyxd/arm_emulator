@@ -28,6 +28,9 @@ jobs:
         sudo apt install pkg-config libglib2.0-dev
         make V=1
         ./armemulator -h
+        make clean
+        make V=1 NO_GLIB=1
+        ./armemulator -h
 
 
   build-macOS-latest:
@@ -46,3 +49,7 @@ jobs:
         brew install pkg-config glib
         make V=1
         ./armemulator -h
+        make clean
+        make V=1 NO_GLIB=1
+        ./armemulator -h
+
