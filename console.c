@@ -92,7 +92,7 @@ static void console_prepare_callback(void *opaque)
     int events = POLLIN;
     if(c->send.in != c->send.out) {
         events |= POLLOUT;
-        loop_set_timeout(&loop_default, 1);
+        loop_set_timeout(&loop_default, 0);
         c->send_time_cnt = loop_get_clock_ms(&loop_default);
     } else {
         if(loop_get_clock_ms(&loop_default) - c->send_time_cnt >= 2) {
