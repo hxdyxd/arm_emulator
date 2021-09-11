@@ -108,7 +108,7 @@ sudo make install
 ## Build linux zImage with buildroot
 
 ```
-sudo apt-get install libncurses-dev flex bison bc
+sudo apt-get install libncurses-dev flex bison bc gcc g++
 sudo apt-get install unzip rsync python3 texinfo
 git clone https://github.com/hxdyxd/buildroot
 cd buildroot
